@@ -47,7 +47,7 @@ export class SlotsService {
 
 			const slots: ApiSlotData[] = await response.json();
 			const processingState = this.parseProcessingState(slots);
-			
+
 			this.callbacks.forEach(callback => {
 				try {
 					callback(processingState);
@@ -78,7 +78,7 @@ export class SlotsService {
 		}
 
 		let status: ApiProcessingState['status'] = 'idle';
-		
+
 		if (activeSlot.is_processing) {
 			status = 'generating';
 		} else if (activeSlot.next_token.n_decoded === 0 && activeSlot.id_task !== -1) {

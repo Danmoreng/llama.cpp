@@ -1,4 +1,12 @@
 import { config } from '$lib/stores/settings.svelte';
+import type { ApiFunctionTool, ApiToolCall, ApiToolChoice } from '$lib/types/api';
+
+type ToolOptions = {
+	tools?: ApiFunctionTool[];
+	tool_choice?: ApiToolChoice;
+	onToolCalls?: (calls: ApiToolCall[]) => void;
+};
+
 
 /**
  * Service class for handling chat completions with the llama.cpp server.
@@ -10,7 +18,7 @@ export class ChatService {
 	/**
 	 * Sends a chat completion request to the llama.cpp server.
 	 * Supports both streaming and non-streaming responses with comprehensive parameter configuration.
-	 * 
+	 *
 	 * @param messages - Array of chat messages to send to the API
 	 * @param options - Configuration options for the chat completion request. See `SettingsChatServiceOptions` type for details.
 	 * @returns {Promise<string | void>} that resolves to the complete response string (non-streaming) or void (streaming)
@@ -18,20 +26,41 @@ export class ChatService {
 	 */
 	async sendMessage(
 		messages: ApiChatMessageData[],
-		options: SettingsChatServiceOptions = {}
+		options: SettingsChatServiceOptions & ToolOptions = {}
 	): Promise<string | void> {
-		const { 
-			stream, onChunk, onComplete, onError,
+		const {
+			stream,
+			onChunk,
+			onComplete,
+			onError,
 			// Generation parameters
-			temperature, max_tokens,
+			temperature,
+			max_tokens,
 			// Sampling parameters
-			dynatemp_range, dynatemp_exponent, top_k, top_p, min_p,
-			xtc_probability, xtc_threshold, typical_p,
+			dynatemp_range,
+			dynatemp_exponent,
+			top_k,
+			top_p,
+			min_p,
+			xtc_probability,
+			xtc_threshold,
+			typical_p,
 			// Penalty parameters
-			repeat_last_n, repeat_penalty, presence_penalty, frequency_penalty,
-			dry_multiplier, dry_base, dry_allowed_length, dry_penalty_last_n,
+			repeat_last_n,
+			repeat_penalty,
+			presence_penalty,
+			frequency_penalty,
+			dry_multiplier,
+			dry_base,
+			dry_allowed_length,
+			dry_penalty_last_n,
 			// Other parameters
-			samplers, custom
+			samplers,
+			custom,
+			// tools
+			tools,
+			tool_choice,
+			onToolCalls
 		} = options;
 
 		// Cancel any ongoing request and create a new abort controller
@@ -47,6 +76,10 @@ export class ChatService {
 			})),
 			stream
 		};
+
+		// pass tool calling config
+		if (tools?.length) requestBody.tools = tools;
+		if (tool_choice) requestBody.tool_choice = tool_choice;
 
 		// Add generation parameters if provided
 		if (temperature !== undefined) requestBody.temperature = temperature;
@@ -74,7 +107,10 @@ export class ChatService {
 
 		// Add sampler configuration if provided
 		if (samplers !== undefined) {
-			requestBody.samplers = typeof samplers === 'string' ? samplers.split(';').filter((s: string) => s.trim()) : samplers;
+			requestBody.samplers =
+				typeof samplers === 'string'
+					? samplers.split(';').filter((s: string) => s.trim())
+					: samplers;
 		}
 
 		// Add custom parameters if provided
@@ -102,9 +138,15 @@ export class ChatService {
 			}
 
 			if (stream) {
-				return this.handleStreamResponse(response, onChunk, onComplete, onError);
+				return this.handleStreamResponse(
+					response,
+					onChunk,
+					onComplete,
+					onError,
+					onToolCalls
+				);
 			} else {
-				return this.handleNonStreamResponse(response, onComplete, onError);
+				return this.handleNonStreamResponse(response, onComplete, onError, onToolCalls);
 			}
 		} catch (error) {
 			if (error instanceof Error && error.name === 'AbortError') {
@@ -122,11 +164,12 @@ export class ChatService {
 	/**
 	 * Handles streaming response from the chat completion API.
 	 * Processes server-sent events and extracts content chunks from the stream.
-	 * 
+	 *
 	 * @param response - The fetch Response object containing the streaming data
 	 * @param onChunk - Optional callback invoked for each content chunk received
 	 * @param onComplete - Optional callback invoked when the stream is complete with full response
 	 * @param onError - Optional callback invoked if an error occurs during streaming
+	 * @param onToolCalls - Optional callback invoked when model chooses tool call(s)
 	 * @returns {Promise<void>} Promise that resolves when streaming is complete
 	 * @throws {Error} if the stream cannot be read or parsed
 	 */
@@ -134,7 +177,8 @@ export class ChatService {
 		response: Response,
 		onChunk?: (chunk: string) => void,
 		onComplete?: (response: string) => void,
-		onError?: (error: Error) => void
+		onError?: (error: Error) => void,
+		onToolCalls?: (calls: ApiToolCall[]) => void
 	): Promise<void> {
 		const reader = response.body?.getReader();
 
@@ -144,9 +188,22 @@ export class ChatService {
 
 		const decoder = new TextDecoder();
 		let fullResponse = '';
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		let thinkContent = '';
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		let regularContent = '';
 		let insideThinkTag = false;
+
+		const toolCallBuffer = new Map<number, ApiToolCall>();
+		const flushToolCalls = () => {
+			if (!toolCallBuffer.size) return;
+			const calls = Array.from(toolCallBuffer.entries())
+				.sort((a, b) => a[0] - b[0])
+				.map(([, v]) => v)
+				.filter((c) => c.function?.name); // only emit if name exists
+			if (calls.length) onToolCalls?.(calls);
+			toolCallBuffer.clear();
+		};
 
 		try {
 			while (true) {
@@ -160,13 +217,36 @@ export class ChatService {
 					if (line.startsWith('data: ')) {
 						const data = line.slice(6);
 						if (data === '[DONE]') {
+							flushToolCalls();
 							onComplete?.(fullResponse);
 							return;
 						}
 
 						try {
 							const parsed: ApiChatCompletionStreamChunk = JSON.parse(data);
-							const content = parsed.choices[0]?.delta?.content;
+							const choice = parsed.choices?.[0];
+							const delta = choice?.delta;
+
+							if (delta?.tool_calls?.length) {
+								for (const tc of delta.tool_calls) {
+									const idx = tc.index ?? 0;
+									let entry = toolCallBuffer.get(idx);
+									if (!entry) {
+										entry = {
+											id: undefined,
+											type: 'function',
+											function: { name: '', arguments: '' }
+										};
+										toolCallBuffer.set(idx, entry);
+									}
+									if (tc.id) entry.id = tc.id;
+									if (tc.function?.name) entry.function.name = tc.function.name;
+									if (tc.function?.arguments)
+										entry.function.arguments += tc.function.arguments;
+								}
+							}
+
+							const content = delta?.content ?? '';
 							if (content) {
 								fullResponse += content;
 
@@ -183,6 +263,10 @@ export class ChatService {
 								);
 
 								onChunk?.(content);
+							}
+							// If model finishes specifically for tool calls, emit immediately
+							if (choice?.finish_reason === 'tool_calls') {
+								flushToolCalls();
 							}
 						} catch (e) {
 							console.error('Error parsing JSON chunk:', e);
@@ -204,21 +288,26 @@ export class ChatService {
 	/**
 	 * Handles non-streaming response from the chat completion API.
 	 * Parses the JSON response and extracts the generated content.
-	 * 
+	 *
 	 * @param response - The fetch Response object containing the JSON data
 	 * @param onComplete - Optional callback invoked when response is successfully parsed
 	 * @param onError - Optional callback invoked if an error occurs during parsing
+	 * @param onToolCalls - Optional callback invoked when model chooses tool call(s)
 	 * @returns {Promise<string>} Promise that resolves to the generated content string
 	 * @throws {Error} if the response cannot be parsed or is malformed
 	 */
 	private async handleNonStreamResponse(
 		response: Response,
 		onComplete?: (response: string) => void,
-		onError?: (error: Error) => void
+		onError?: (error: Error) => void,
+	    onToolCalls?: (calls: ApiToolCall[]) => void
 	): Promise<string> {
 		try {
 			const data: ApiChatCompletionResponse = await response.json();
 			const content = data.choices[0]?.message?.content || '';
+
+			const toolCalls = choice?.message?.tool_calls;
+			if (toolCalls?.length) onToolCalls?.(toolCalls);
 
 			onComplete?.(content);
 
@@ -236,7 +325,7 @@ export class ChatService {
 	 * Converts a database message with attachments to API chat message format.
 	 * Processes various attachment types (images, text files, PDFs) and formats them
 	 * as content parts suitable for the chat completion API.
-	 * 
+	 *
 	 * @param message - Database message object with optional extra attachments
 	 * @param message.content - The text content of the message
 	 * @param message.role - The role of the message sender (user, assistant, system)
@@ -244,7 +333,9 @@ export class ChatService {
 	 * @returns {ApiChatMessageData} object formatted for the chat completion API
 	 * @static
 	 */
-	static convertMessageToChatServiceData(message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }): ApiChatMessageData {
+	static convertMessageToChatServiceData(
+		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
+	): ApiChatMessageData {
 		// If no extras, return simple text message
 		if (!message.extra || message.extra.length === 0) {
 			return {
@@ -265,7 +356,10 @@ export class ChatService {
 		}
 
 		// Add image files
-		const imageFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile => extra.type === 'imageFile');
+		const imageFiles = message.extra.filter(
+			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile =>
+				extra.type === 'imageFile'
+		);
 
 		for (const image of imageFiles) {
 			contentParts.push({
@@ -275,7 +369,10 @@ export class ChatService {
 		}
 
 		// Add text files as additional text content
-		const textFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile => extra.type === 'textFile');
+		const textFiles = message.extra.filter(
+			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile =>
+				extra.type === 'textFile'
+		);
 
 		for (const textFile of textFiles) {
 			contentParts.push({
@@ -285,7 +382,10 @@ export class ChatService {
 		}
 
 		// Add audio files
-		const audioFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile => extra.type === 'audioFile');
+		const audioFiles = message.extra.filter(
+			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile =>
+				extra.type === 'audioFile'
+		);
 
 		for (const audio of audioFiles) {
 			contentParts.push({
@@ -298,7 +398,10 @@ export class ChatService {
 		}
 
 		// Add PDF files as text content
-		const pdfFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile => extra.type === 'pdfFile');
+		const pdfFiles = message.extra.filter(
+			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile =>
+				extra.type === 'pdfFile'
+		);
 
 		for (const pdfFile of pdfFiles) {
 			if (pdfFile.processedAsImages && pdfFile.images) {
@@ -327,7 +430,7 @@ export class ChatService {
 	/**
 	 * Unified method to send chat completions supporting both ApiChatMessageData and DatabaseMessage types.
 	 * Automatically converts database messages with attachments to the appropriate API format.
-	 * 
+	 *
 	 * @param messages - Array of messages in either API format or database format with attachments
 	 * @param options - Configuration options for the chat completion
 	 * @param options.stream - Whether to use streaming response (default: true)
@@ -339,7 +442,9 @@ export class ChatService {
 	 * @returns Promise that resolves to the complete response string or void for streaming
 	 */
 	async sendChatCompletion(
-		messages: (ApiChatMessageData[] | DatabaseMessage[]) | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
+		messages:
+			| (ApiChatMessageData[] | DatabaseMessage[])
+			| (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
 		options: {
 			stream?: boolean;
 			temperature?: number;
@@ -347,7 +452,7 @@ export class ChatService {
 			onChunk?: (chunk: string) => void;
 			onComplete?: (response?: string) => void;
 			onError?: (error: Error) => void;
-		} = {}
+		} & ToolOptions = {}
 	): Promise<string | void> {
 		// Handle both array formats and convert messages with extras
 		const normalizedMessages: ApiChatMessageData[] = messages.map((msg) => {
@@ -377,7 +482,7 @@ export class ChatService {
 	/**
 	 * Static method for backward compatibility with the legacy ApiService.
 	 * Creates a temporary ChatService instance and sends a chat completion request.
-	 * 
+	 *
 	 * @param messages - Array of database messages to send
 	 * @param onChunk - Optional callback for streaming response chunks
 	 * @param onComplete - Optional callback when response is complete
@@ -430,7 +535,7 @@ export class ChatService {
 	/**
 	 * Processes content to separate thinking tags from regular content.
 	 * Parses <think> and </think> tags to route content to appropriate handlers.
-	 * 
+	 *
 	 * @param content - The content string to process
 	 * @param currentInsideThinkTag - Current state of whether we're inside a think tag
 	 * @param addThinkContent - Callback to handle content inside think tags
@@ -478,7 +583,7 @@ export class ChatService {
 	/**
 	 * Aborts any ongoing chat completion request.
 	 * Cancels the current request and cleans up the abort controller.
-	 * 
+	 *
 	 * @public
 	 */
 	public abort(): void {
@@ -492,7 +597,7 @@ export class ChatService {
 	 * Injects a system message at the beginning of the conversation if configured in settings.
 	 * Checks for existing system messages to avoid duplication and retrieves the system message
 	 * from the current configuration settings.
-	 * 
+	 *
 	 * @param messages - Array of chat messages to process
 	 * @returns Array of messages with system message injected at the beginning if configured
 	 * @private
@@ -500,23 +605,18 @@ export class ChatService {
 	private injectSystemMessage(messages: ApiChatMessageData[]): ApiChatMessageData[] {
 		const currentConfig = config();
 		const systemMessage = currentConfig.systemMessage?.toString().trim();
-		
+
 		// If no system message is configured, return messages as-is
 		if (!systemMessage) {
 			return messages;
 		}
-		
+
 		// Check if first message is already a system message
-		if (messages.length > 0 && messages[0].role === 'system') {
-			return messages;
-		}
-		
-		// Inject system message at the beginning
-		const systemMsg: ApiChatMessageData = {
-			role: 'system',
-			content: systemMessage
-		};
-		
+		const first = messages[0];
+		if (first && 'role' in first && (first as any).role === 'system') return messages;
+
+		const systemMsg: ApiChatMessageData = { role: 'system', content: systemMessage };
+
 		return [systemMsg, ...messages];
 	}
 }

@@ -6,8 +6,8 @@
     <h1>Header elements</h1>
     <div class="flex flex-row h-full">
         <textarea class="flex-1" bind:value={editorStore.currentCode}></textarea>
-        <div class="flex flex-1 border-2 border-gray-300">
-            <iframe sandbox="allow-scripts" srcdoc={editorStore.currentCode}></iframe>
+        <div class="flex flex-1">
+            <iframe class="w-full" sandbox="allow-scripts" srcdoc={editorStore.currentCode}></iframe>
         </div>
     </div>
 </div>
