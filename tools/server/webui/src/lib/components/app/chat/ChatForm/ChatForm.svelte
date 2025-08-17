@@ -4,11 +4,11 @@
 	import { inputClasses } from '$lib/constants/input-classes';
 	import { onMount } from 'svelte';
 	import { config } from '$lib/stores/settings.svelte';
-	import { 
-		AudioRecorder, 
-		convertToWav, 
-		createAudioFile, 
-		isAudioRecordingSupported 
+	import {
+		AudioRecorder,
+		convertToWav,
+		createAudioFile,
+		isAudioRecordingSupported
 	} from '$lib/utils/audio-recording';
 	import { TextMimeType } from '$lib/constants/supported-file-types';
 
@@ -144,7 +144,7 @@
 				const audioBlob = await audioRecorder.stopRecording();
 				const wavBlob = await convertToWav(audioBlob);
 				const audioFile = createAudioFile(wavBlob);
-				
+
 				onFileUpload?.([audioFile]);
 				isRecording = false;
 			} catch (error) {

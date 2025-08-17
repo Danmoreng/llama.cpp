@@ -19,6 +19,7 @@
 	import { navigating } from '$app/state';
 	import ChatScreenDragOverlay from './ChatScreenDragOverlay.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+    import CodeEditor from "$lib/components/app/chat/ChatHTMLEditor/CodeEditor.svelte";
 
 	let { showCenteredEmpty = false } = $props();
 	let chatScrollContainer: HTMLDivElement | undefined = $state();
@@ -27,7 +28,7 @@
 	let uploadedFiles = $state<ChatUploadedFile[]>([]);
 	let isDragOver = $state(false);
 	let dragCounter = $state(0);
-	
+
 	// Alert Dialog state for file upload errors
 	let showFileErrorDialog = $state(false);
 	let fileErrorData = $state<{
@@ -128,7 +129,7 @@
 
 		await sendMessage(message, extras);
 		scrollChatToBottom();
-		
+
 		return true;
 	}
 
@@ -156,7 +157,7 @@
 			const supportedTypes: string[] = ['text files', 'PDFs'];
 			if (supportsVision()) supportedTypes.push('images');
 			if (supportsAudio()) supportedTypes.push('audio files');
-			
+
 			// Structure error data for better presentation
 			fileErrorData = {
 				generallyUnsupported,
@@ -207,10 +208,10 @@
 {/if}
 
 <ChatScreenHeader />
-
+<div class="flex flex-row h-full overflow-y-auto">
 {#if !isEmpty}
 	<div
-		class="flex h-full flex-col overflow-y-auto px-4 md:px-6"
+		class="flex h-full flex-col flex-grow flex-1 overflow-y-auto px-4 md:px-6"
 		bind:this={chatScrollContainer}
 		onscroll={handleScroll}
 		ondragenter={handleDragEnter}
@@ -221,7 +222,6 @@
 		aria-label="Chat interface with file drop zone"
 	>
 		<ChatMessages class="mb-16 md:mb-24" messages={activeMessages()} />
-
 		<div class="sticky bottom-0 left-0 right-0 mt-auto" in:slide={{ duration: 150, axis: 'y' }}>
 			<div class="conversation-chat-form rounded-t-3xl pb-4">
 				<ChatForm
@@ -271,6 +271,8 @@
 		</div>
 	</div>
 {/if}
+<CodeEditor></CodeEditor>
+</div>
 
 <!-- File Upload Error Alert Dialog -->
 <AlertDialog.Root bind:open={showFileErrorDialog}>
@@ -283,7 +285,7 @@
 					Some files cannot be uploaded with the current model.
 				</AlertDialog.Description>
 			</AlertDialog.Header>
-			
+
 			<div class="space-y-4">
 				<!-- Generally unsupported files -->
 				{#if fileErrorData.generallyUnsupported.length > 0}
@@ -299,7 +301,7 @@
 						</div>
 					</div>
 				{/if}
-				
+
 				<!-- Modality-restricted files -->
 				{#if fileErrorData.modalityUnsupported.length > 0}
 					<div class="space-y-2">
@@ -316,7 +318,7 @@
 						</div>
 					</div>
 				{/if}
-				
+
 				<!-- Supported file types -->
 				<div class="rounded-md bg-muted/50 p-3">
 					<h4 class="text-sm font-medium mb-2">This model supports:</h4>
@@ -325,7 +327,7 @@
 					</p>
 				</div>
 			</div>
-			
+
 			<AlertDialog.Footer>
 				<AlertDialog.Action onclick={() => showFileErrorDialog = false}>
 					Got it
