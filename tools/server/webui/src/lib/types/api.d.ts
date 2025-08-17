@@ -94,6 +94,62 @@ export interface ApiLlamaCppServerProps {
 	build_info: string;
 }
 
+// function tool definition
+export type ApiFunctionTool = {
+	type: 'function';
+	function: {
+		name: string;
+		description?: string;
+		parameters: any; // If you have a JSONSchema type, use it here
+	};
+};
+
+// NEW: Tool choice (auto/none or force a specific function)
+export type ApiToolChoice =
+	| 'none'
+	| 'auto'
+	| { type: 'function'; function: { name: string } };
+
+// Completed tool call (non-stream responses or end of stream)
+export type ApiToolCall = {
+	id?: string;
+	type: 'function';
+	function: {
+		name: string;
+		arguments: string; // JSON-encoded args
+	};
+};
+
+// Streaming delta for a tool call (arrives in pieces)
+export type ApiToolCallDelta = {
+	index: number;
+	id?: string;
+	type?: 'function';
+	function?: {
+		name?: string;
+		arguments?: string; // append as it streams
+	};
+};
+
+// Finish reason union (covers tool_calls)
+export type ApiFinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | string;
+
+// "tool" role message to return tool results back to the model
+export interface ApiToolMessageData {
+	role: 'tool';
+	content: string;          // tool result payload (often JSON string)
+	tool_call_id?: string;    // echo back the call id if provided by the model
+	name?: string;            // optional: function name (some impls accept this)
+}
+
+// Request message union — keeps original message shape AND allows tool messages
+export type ApiRequestMessage =
+	| {
+			role: Exclude<ChatRole, 'tool'>; // user/assistant/system (whatever ChatRole already allows)
+			content: string | ApiChatMessageContentPart[];
+	  }
+	| ApiToolMessageData;
+
 export interface ApiChatCompletionRequest {
 	messages: Array<{
 		role: ChatRole;
@@ -123,15 +179,22 @@ export interface ApiChatCompletionRequest {
 	dry_penalty_last_n?: number;
 	// Sampler configuration
 	samplers?: string[];
-	// Custom parameters (JSON string)
+	// tool calling
+	tools?: ApiFunctionTool[];
+	tool_choice?: ApiToolChoice;
+	// Custom parameters (JSON object/string)
 	custom?: any;
 }
 
 export interface ApiChatCompletionStreamChunk {
 	choices: Array<{
+		index?: number;
 		delta: {
-			content?: string;
+			role?: 'assistant';
+			content?: string | null;
+			tool_calls?: ApiToolCallDelta[];
 		};
+		finish_reason?: ApiFinishReason | null;
 	}>;
 	timings?: {
 		prompt_n?: number;
@@ -143,10 +206,19 @@ export interface ApiChatCompletionStreamChunk {
 
 export interface ApiChatCompletionResponse {
 	choices: Array<{
+		index?: number;
 		message: {
-			content: string;
+			role: 'assistant';
+			content?: string | null;
+			tool_calls?: ApiToolCall[];
 		};
+		finish_reason?: ApiFinishReason | null;
 	}>;
+	usage?: {
+		prompt_tokens?: number;
+		completion_tokens?: number;
+		total_tokens?: number;
+	};
 }
 
 export interface ApiSlotData {

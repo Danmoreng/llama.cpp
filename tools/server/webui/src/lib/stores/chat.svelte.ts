@@ -4,6 +4,8 @@ import { goto } from '$app/navigation';
 import { browser } from '$app/environment';
 import { extractPartialThinking } from '$lib/utils/thinking';
 import { config } from '$lib/stores/settings.svelte';
+import type { ApiToolCall, ApiToolMessageData } from '$lib/types/api';
+import { editorTools, executeEditorTool } from '$lib/tools/editorTools';
 
 class ChatStore {
 	activeConversation = $state<DatabaseConversation | null>(null);
@@ -12,7 +14,12 @@ class ChatStore {
 	currentResponse = $state('');
 	isInitialized = $state(false);
 	isLoading = $state(false);
-	maxContextError = $state<{ message: string; estimatedTokens: number; maxAllowed: number; maxContext: number } | null>(null);
+	maxContextError = $state<{
+		message: string;
+		estimatedTokens: number;
+		maxAllowed: number;
+		maxContext: number;
+	} | null>(null);
 	private chatService = new ChatService();
 
 	constructor() {
@@ -121,7 +128,7 @@ class ChatStore {
 
 		// Get current settings
 		const currentConfig = config();
-		
+
 		// Build complete options from settings
 		const apiOptions = {
 			stream: true,
@@ -149,13 +156,22 @@ class ChatStore {
 			// Sampler configuration
 			samplers: currentConfig.samplers || 'top_k;tfs_z;typical_p;top_p;min_p;temperature',
 			// Custom parameters
-			custom: currentConfig.custom || '',
+			custom: currentConfig.custom || ''
 		};
-	
-		await this.chatService.sendChatCompletion(
-			allMessages,
-			{
+
+		// We keep a mutable "history tail" to append tool results between rounds.
+		let toolTail: ApiToolMessageData[] = [];
+
+		while (true) {
+			streamedContent = ''; // reset for this round
+
+			// collect tool calls emitted during this round (do not start another request yet)
+			const collectedToolCalls: ApiToolCall[] = [];
+
+			await this.chatService.sendChatCompletion([...allMessages, ...toolTail], {
 				...apiOptions,
+				tools: editorTools,
+				tool_choice: 'auto',
 				onChunk: (chunk: string) => {
 					streamedContent += chunk;
 					this.currentResponse = streamedContent;
@@ -169,9 +185,16 @@ class ChatStore {
 
 					if (messageIndex !== -1) {
 						// Update message with parsed content
-						this.activeMessages[messageIndex].content = partialThinking.remainingContent || streamedContent;
+						this.activeMessages[messageIndex].content =
+							partialThinking.remainingContent || streamedContent;
 					}
 				},
+
+				// If the model calls tools during this round
+				onToolCalls: (calls: ApiToolCall[]) => {
+					collectedToolCalls.push(...calls);
+				},
+
 				onComplete: async () => {
 					// Update assistant message in database
 					await DatabaseService.updateMessage(assistantMessage.id, {
@@ -211,15 +234,44 @@ class ChatStore {
 						onError(error);
 					}
 				}
+			});
+
+			// After the stream completes, decide whether to finish or run tools and continue
+			if (collectedToolCalls.length === 0) {
+				// Update assistant message in database
+				await DatabaseService.updateMessage(assistantMessage.id, {
+					content: streamedContent
+				});
+
+				// Call custom completion handler if provided
+				if (onComplete) {
+					await onComplete(streamedContent);
+				}
+
+				this.isLoading = false;
+				this.currentResponse = '';
+				break; // no more tool calls -> end the loop
 			}
-		);
+
+			// Execute ALL calls, collect tool messages
+			const toolMsgs: ApiToolMessageData[] = [];
+			for (const c of collectedToolCalls) {
+				const toolMsg = await executeEditorTool(c);
+				toolMsgs.push(toolMsg);
+			}
+
+			// Recurse: continue the same assistant turn with the new tool outputs added
+			toolTail = [...toolTail, ...toolMsgs];
+		}
 	}
 
 	/**
 	 * Private helper to handle abort errors consistently
 	 */
 	private isAbortError(error: unknown): boolean {
-		return error instanceof Error && (error.name === 'AbortError' || error instanceof DOMException);
+		return (
+			error instanceof Error && (error.name === 'AbortError' || error instanceof DOMException)
+		);
 	}
 
 	/**
@@ -268,7 +320,9 @@ class ChatStore {
 				await this.updateConversationName(this.activeConversation.id, title);
 			}
 
-			const allMessages = await DatabaseService.getConversationMessages(this.activeConversation.id);
+			const allMessages = await DatabaseService.getConversationMessages(
+				this.activeConversation.id
+			);
 			const assistantMessage = await this.addMessage('assistant', '');
 
 			if (!assistantMessage) {
@@ -317,22 +371,28 @@ class ChatStore {
 	}
 
 	// Allow external modules to set context error without importing heavy utils here
-	setMaxContextError(error: { message: string; estimatedTokens: number; maxAllowed: number; maxContext: number } | null): void {
+	setMaxContextError(
+		error: {
+			message: string;
+			estimatedTokens: number;
+			maxAllowed: number;
+			maxContext: number;
+		} | null
+	): void {
 		this.maxContextError = error;
 	}
 
-	private async savePartialResponseIfNeeded() {		
+	private async savePartialResponseIfNeeded() {
 		if (!this.currentResponse.trim() || !this.activeMessages.length) {
 			return;
 		}
 
 		const lastMessage = this.activeMessages[this.activeMessages.length - 1];
-		
+
 		if (lastMessage && lastMessage.role === 'assistant') {
 			try {
 				const partialThinking = extractPartialThinking(this.currentResponse);
-				
-				
+
 				const updateData: { content: string; thinking?: string } = {
 					content: partialThinking.remainingContent || this.currentResponse
 				};
@@ -340,7 +400,7 @@ class ChatStore {
 				if (partialThinking.thinking) {
 					updateData.thinking = partialThinking.thinking;
 				}
-				
+
 				await DatabaseService.updateMessage(lastMessage.id, updateData);
 
 				lastMessage.content = partialThinking.remainingContent || this.currentResponse;
@@ -355,14 +415,16 @@ class ChatStore {
 
 	async updateMessage(messageId: string, newContent: string): Promise<void> {
 		if (!this.activeConversation) return;
-		
+
 		// If currently loading, gracefully abort the ongoing generation
 		if (this.isLoading) {
 			this.stopGeneration();
 		}
 
 		try {
-			const messageIndex = this.activeMessages.findIndex((m: DatabaseMessage) => m.id === messageId);
+			const messageIndex = this.activeMessages.findIndex(
+				(m: DatabaseMessage) => m.id === messageId
+			);
 
 			if (messageIndex === -1) {
 				console.error('Message not found for update');
@@ -371,7 +433,7 @@ class ChatStore {
 
 			const messageToUpdate = this.activeMessages[messageIndex];
 			const originalContent = messageToUpdate.content;
-			
+
 			if (messageToUpdate.role !== 'user') {
 				console.error('Only user messages can be edited');
 				return;
@@ -422,7 +484,7 @@ class ChatStore {
 			} catch (regenerateError) {
 				console.error('Failed to regenerate response:', regenerateError);
 				this.isLoading = false;
-				
+
 				const messageIndex = this.activeMessages.findIndex(
 					(m: DatabaseMessage) => m.id === messageId
 				);
@@ -443,14 +505,16 @@ class ChatStore {
 		if (!this.activeConversation || this.isLoading) return;
 
 		try {
-			const messageIndex = this.activeMessages.findIndex((m: DatabaseMessage) => m.id === messageId);
+			const messageIndex = this.activeMessages.findIndex(
+				(m: DatabaseMessage) => m.id === messageId
+			);
 			if (messageIndex === -1) {
 				console.error('Message not found for regeneration');
 				return;
 			}
 
 			const messageToRegenerate = this.activeMessages[messageIndex];
-			
+
 			if (messageToRegenerate.role !== 'assistant') {
 				console.error('Only assistant messages can be regenerated');
 				return;
@@ -471,9 +535,11 @@ class ChatStore {
 			this.currentResponse = '';
 
 			try {
-				const allMessages = await DatabaseService.getConversationMessages(this.activeConversation.id);
+				const allMessages = await DatabaseService.getConversationMessages(
+					this.activeConversation.id
+				);
 				const assistantMessage = await this.addMessage('assistant', '');
-				
+
 				if (!assistantMessage) {
 					throw new Error('Failed to create assistant message');
 				}
