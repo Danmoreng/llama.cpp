@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
 import devtoolsJson from 'vite-plugin-devtools-json';
+import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 
 const GUIDE_FOR_FRONTEND = `
 <!--
@@ -33,16 +34,27 @@ function llamaCppBuildPlugin() {
                         return;
                     }
 
-                    // Read, normalize line endings, and prefix with guide banner
                     let content = readFileSync(indexPath, 'utf-8');
+
+                    const faviconPath = resolve('static/favicon.svg');
+                    if (existsSync(faviconPath)) {
+                        const faviconContent = readFileSync(faviconPath, 'utf-8');
+                        const faviconBase64 = Buffer.from(faviconContent).toString('base64');
+                        const faviconDataUrl = `data:image/svg+xml;base64,${faviconBase64}`;
+                        
+                        content = content.replace(
+                            /href="[^"]*favicon\.svg"/g,
+                            `href="${faviconDataUrl}"`
+                        );
+                        
+                        console.log('✓ Inlined favicon.svg as base64 data URL');
+                    }
 
                     content = content.replace(/\r/g, '');
                     content = GUIDE_FOR_FRONTEND + '\n' + content;
 
-                    // Gzip with fflate (level 9) and normalize header for reproducibility
                     const compressed = fflate.gzipSync(Buffer.from(content, 'utf-8'), { level: 9 });
 
-                    // Zero gzip mtime and OS bytes for deterministic output
                     compressed[0x4] = 0;
                     compressed[0x5] = 0;
                     compressed[0x6] = 0;
@@ -67,7 +79,12 @@ function llamaCppBuildPlugin() {
 }
 
 export default defineConfig({
-    plugins: [tailwindcss(), sveltekit(), devtoolsJson(), llamaCppBuildPlugin()],
+    plugins: [
+        tailwindcss(),
+        sveltekit(),
+        devtoolsJson(),
+        llamaCppBuildPlugin(),
+    ],
     test: {
         projects: [
             {
@@ -93,6 +110,25 @@ export default defineConfig({
                     include: ['src/**/*.{test,spec}.{js,ts}'],
                     exclude: ['src/**/*.svelte.{test,spec}.{js,ts}']
                 }
+            },
+            {
+                extends: './vite.config.ts',
+                test: {
+                    name: 'storybook',
+                    environment: 'browser',
+                    browser: {
+                        enabled: true,
+                        provider: 'playwright',
+                        instances: [{ browser: 'chromium', headless: true }]
+                    },
+                    include: ['src/**/*.stories.{js,ts,svelte}'],
+                    setupFiles: ['./.storybook/vitest.setup.ts']
+                },
+                plugins: [
+                    storybookTest({
+                        storybookScript: 'pnpm run storybook --no-open',
+                    }),
+                ]
             }
         ]
     },

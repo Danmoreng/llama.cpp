@@ -5,7 +5,9 @@ export { default as ChatAttachmentPreviewDialog } from './chat/ChatAttachments/C
 
 export { default as ChatForm } from './chat/ChatForm/ChatForm.svelte';
 export { default as ChatFormTextarea } from './chat/ChatForm/ChatFormTextarea.svelte';
-export { default as ChatFormActionButtons } from './chat/ChatForm/ChatFormActionButtons.svelte';
+export { default as ChatFormActions } from './chat/ChatForm/ChatFormActions.svelte';
+export { default as ChatFormActionFileAttachments } from './chat/ChatForm/ChatFormActionFileAttachments.svelte';
+export { default as ChatFormActionRecord } from './chat/ChatForm/ChatFormActionRecord.svelte';
 export { default as ChatFormHelperText } from './chat/ChatForm/ChatFormHelperText.svelte';
 export { default as ChatFormFileInputInvisible } from './chat/ChatForm/ChatFormFileInputInvisible.svelte';
 
@@ -28,4 +30,6 @@ export { default as ChatSidebarSearch } from './chat/ChatSidebar/ChatSidebarSear
 export { default as MarkdownContent } from './MarkdownContent.svelte';
 
 export { default as ServerStatus } from './ServerStatus.svelte';
+export { default as ServerErrorSplash } from './ServerErrorSplash.svelte';
+export { default as ServerLoadingSplash } from './ServerLoadingSplash.svelte';
 export { default as ServerInfo } from './ServerInfo.svelte';

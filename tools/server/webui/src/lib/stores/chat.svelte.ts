@@ -6,6 +6,7 @@ import { extractPartialThinking } from '$lib/utils/thinking';
 import { config } from '$lib/stores/settings.svelte';
 import type { ApiToolCall, ApiToolMessageData } from '$lib/types/api';
 import { editorTools, executeEditorTool } from '$lib/tools/editorTools';
+import { slotsService } from '$lib/services/slots';
 
 class ChatStore {
 	activeConversation = $state<DatabaseConversation | null>(null);
@@ -14,12 +15,7 @@ class ChatStore {
 	currentResponse = $state('');
 	isInitialized = $state(false);
 	isLoading = $state(false);
-	maxContextError = $state<{
-		message: string;
-		estimatedTokens: number;
-		maxAllowed: number;
-		maxContext: number;
-	} | null>(null);
+	maxContextError = $state<{ message: string; estimatedTokens: number; maxContext: number } | null>(null);
 	private chatService = new ChatService();
 
 	constructor() {
@@ -31,6 +27,9 @@ class ChatStore {
 	async initialize() {
 		try {
 			await this.loadConversations();
+
+			// Clear any persisting context error state on initialization
+			this.maxContextError = null;
 
 			this.isInitialized = true;
 		} catch (error) {
@@ -51,6 +50,9 @@ class ChatStore {
 		this.activeConversation = conversation;
 		this.activeMessages = [];
 
+		// Clear any context error state when creating a new conversation
+		this.maxContextError = null;
+
 		await goto(`/chat/${conversation.id}`);
 
 		return conversation.id;
@@ -66,6 +68,9 @@ class ChatStore {
 
 			this.activeConversation = conversation;
 			this.activeMessages = await DatabaseService.getConversationMessages(convId);
+
+			// Clear any context error state when loading a conversation
+			this.maxContextError = null;
 
 			return true;
 		} catch (error) {
@@ -217,6 +222,40 @@ class ChatStore {
 						return;
 					}
 
+					// Handle context errors specially
+					if (error.name === 'ContextError') {
+						console.warn('Context error detected:', error.message);
+						this.isLoading = false;
+						this.currentResponse = '';
+
+						slotsService.stopPolling();
+
+						// Remove the assistant message that was created but failed
+						const messageIndex = this.activeMessages.findIndex(
+							(m: DatabaseMessage) => m.id === assistantMessage.id
+						);
+
+						if (messageIndex !== -1) {
+							// Remove from UI
+							this.activeMessages.splice(messageIndex, 1);
+							// Remove from database
+							DatabaseService.deleteMessage(assistantMessage.id).catch(console.error);
+						}
+
+						// Set context error state to show dialog
+						this.maxContextError = {
+							message: error.message,
+							estimatedTokens: 0, // Server-side error, we don't have client estimates
+							maxContext: 4096 // Default fallback, will be updated by context service if available
+						};
+
+						// Call custom error handler if provided
+						if (onError) {
+							onError(error);
+						}
+						return;
+					}
+
 					console.error('Streaming error:', error);
 					this.isLoading = false;
 					this.currentResponse = '';
@@ -307,8 +346,10 @@ class ChatStore {
 		this.isLoading = true;
 		this.currentResponse = '';
 
+		let userMessage: DatabaseMessage | null = null;
+
 		try {
-			const userMessage = await this.addMessage('user', content, 'text', '-1', extras);
+			userMessage = await this.addMessage('user', content, 'text', '-1', extras);
 
 			if (!userMessage) {
 				throw new Error('Failed to add user message');
@@ -320,20 +361,46 @@ class ChatStore {
 				await this.updateConversationName(this.activeConversation.id, title);
 			}
 
-			const allMessages = await DatabaseService.getConversationMessages(
-				this.activeConversation.id
-			);
+			const allMessages = await DatabaseService.getConversationMessages(this.activeConversation.id);
 			const assistantMessage = await this.addMessage('assistant', '');
 
 			if (!assistantMessage) {
 				throw new Error('Failed to create assistant message');
 			}
 
-			await this.streamChatCompletion(allMessages, assistantMessage);
+			await this.streamChatCompletion(allMessages, assistantMessage, undefined, (error: Error) => {
+				// Handle context errors by also removing the user message
+				if (error.name === 'ContextError' && userMessage) {
+					slotsService.stopPolling();
+
+					// Remove user message from UI
+					const userMessageIndex = this.activeMessages.findIndex(
+						(m: DatabaseMessage) => m.id === userMessage!.id
+					);
+					if (userMessageIndex !== -1) {
+						this.activeMessages.splice(userMessageIndex, 1);
+						// Remove from database
+						DatabaseService.deleteMessage(userMessage.id).catch(console.error);
+					}
+				}
+			});
 		} catch (error) {
 			if (this.isAbortError(error)) {
 				this.isLoading = false;
 				return;
+			}
+
+			// Handle context errors by removing the user message if it was added
+			if (error instanceof Error && error.name === 'ContextError' && userMessage) {
+				slotsService.stopPolling();
+
+				const userMessageIndex = this.activeMessages.findIndex(
+					(m: DatabaseMessage) => m.id === userMessage.id
+				);
+				if (userMessageIndex !== -1) {
+					this.activeMessages.splice(userMessageIndex, 1);
+					DatabaseService.deleteMessage(userMessage.id).catch(console.error);
+				}
 			}
 
 			console.error('Failed to send message:', error);
@@ -371,14 +438,7 @@ class ChatStore {
 	}
 
 	// Allow external modules to set context error without importing heavy utils here
-	setMaxContextError(
-		error: {
-			message: string;
-			estimatedTokens: number;
-			maxAllowed: number;
-			maxContext: number;
-		} | null
-	): void {
+	setMaxContextError(error: { message: string; estimatedTokens: number; maxContext: number } | null): void {
 		this.maxContextError = error;
 	}
 
@@ -392,6 +452,7 @@ class ChatStore {
 		if (lastMessage && lastMessage.role === 'assistant') {
 			try {
 				const partialThinking = extractPartialThinking(this.currentResponse);
+
 
 				const updateData: { content: string; thinking?: string } = {
 					content: partialThinking.remainingContent || this.currentResponse
@@ -422,9 +483,7 @@ class ChatStore {
 		}
 
 		try {
-			const messageIndex = this.activeMessages.findIndex(
-				(m: DatabaseMessage) => m.id === messageId
-			);
+			const messageIndex = this.activeMessages.findIndex((m: DatabaseMessage) => m.id === messageId);
 
 			if (messageIndex === -1) {
 				console.error('Message not found for update');
@@ -505,9 +564,7 @@ class ChatStore {
 		if (!this.activeConversation || this.isLoading) return;
 
 		try {
-			const messageIndex = this.activeMessages.findIndex(
-				(m: DatabaseMessage) => m.id === messageId
-			);
+			const messageIndex = this.activeMessages.findIndex((m: DatabaseMessage) => m.id === messageId);
 			if (messageIndex === -1) {
 				console.error('Message not found for regeneration');
 				return;
@@ -535,9 +592,7 @@ class ChatStore {
 			this.currentResponse = '';
 
 			try {
-				const allMessages = await DatabaseService.getConversationMessages(
-					this.activeConversation.id
-				);
+				const allMessages = await DatabaseService.getConversationMessages(this.activeConversation.id);
 				const assistantMessage = await this.addMessage('assistant', '');
 
 				if (!assistantMessage) {
@@ -597,6 +652,7 @@ class ChatStore {
 		this.activeMessages = [];
 		this.currentResponse = '';
 		this.isLoading = false;
+		this.maxContextError = null;
 	}
 }
 

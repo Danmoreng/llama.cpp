@@ -3,8 +3,12 @@
 	import { processFilesToChatUploaded } from '$lib/utils/process-uploaded-files';
 	import { serverStore } from '$lib/stores/server.svelte';
 	import { isFileTypeSupported } from '$lib/constants/supported-file-types';
-	import { filterFilesByModalities, generateModalityErrorMessage } from '$lib/utils/modality-file-validation';
-	import { ChatForm, ChatScreenHeader, ChatMessages, ServerInfo } from '$lib/components/app';
+	import {
+		filterFilesByModalities,
+		generateModalityErrorMessage
+	} from '$lib/utils/modality-file-validation';
+	import { supportsVision, supportsAudio, serverError, serverLoading } from '$lib/stores/server.svelte';
+	import { ChatForm, ChatScreenHeader, ChatMessages, ServerInfo, ServerErrorSplash, ServerLoadingSplash } from '$lib/components/app';
 	import {
 		activeMessages,
 		activeConversation,
@@ -13,13 +17,14 @@
 		stopGeneration,
 		setMaxContextError
 	} from '$lib/stores/chat.svelte';
-	import { wouldExceedContextLength } from '$lib/utils/token-estimation';
+	import { contextService } from '$lib/services/context';
 	import { fade, fly, slide } from 'svelte/transition';
 	import { AUTO_SCROLL_THRESHOLD } from '$lib/constants/auto-scroll';
 	import { navigating } from '$app/state';
 	import ChatScreenDragOverlay from './ChatScreenDragOverlay.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
     import CodeEditor from "$lib/components/app/chat/ChatHTMLEditor/CodeEditor.svelte";
+
 
 	let { showCenteredEmpty = false } = $props();
 	let chatScrollContainer: HTMLDivElement | undefined = $state();
@@ -46,6 +51,9 @@
 	const isEmpty = $derived(
 		showCenteredEmpty && !activeConversation() && activeMessages().length === 0 && !isLoading()
 	);
+
+	const hasServerError = $derived(serverError());
+	const isServerLoading = $derived(serverLoading());
 
 	function handleDragEnter(event: DragEvent) {
 		event.preventDefault();
@@ -103,28 +111,20 @@
 		files?: ChatUploadedFile[]
 	): Promise<boolean> {
 		const extras = files ? await parseFilesToMessageExtras(files) : undefined;
-		const maxContextLength = serverStore.serverProps?.default_generation_settings.n_ctx;
 
-		if (maxContextLength) {
-			const contextCheck = wouldExceedContextLength(
-				activeMessages(),
-				message,
-				extras,
-				maxContextLength
-			);
+		// Check context limit using real-time slots data
+		const contextCheck = await contextService.checkContextLimit();
 
-			if (contextCheck.wouldExceed) {
-				const errorMessage = `Message too long for context window. Estimated tokens: ${contextCheck.estimatedTokens.toLocaleString()}, Maximum allowed: ${contextCheck.maxAllowed.toLocaleString()} (Context: ${maxContextLength.toLocaleString()})`;
+		if (contextCheck && contextCheck.wouldExceed) {
+			const errorMessage = contextService.getContextErrorMessage(contextCheck);
 
-				setMaxContextError({
-					message: errorMessage,
-					estimatedTokens: contextCheck.estimatedTokens,
-					maxAllowed: contextCheck.maxAllowed,
-					maxContext: maxContextLength
-				});
+			setMaxContextError({
+				message: errorMessage,
+				estimatedTokens: contextCheck.currentUsage,
+				maxContext: contextCheck.maxContext
+			});
 
-				return false;
-			}
+			return false;
 		}
 
 		await sendMessage(message, extras);
@@ -147,7 +147,8 @@
 		}
 
 		// Then filter by model modalities
-		const { supportedFiles, unsupportedFiles, modalityReasons } = filterFilesByModalities(generallySupported);
+		const { supportedFiles, unsupportedFiles, modalityReasons } =
+			filterFilesByModalities(generallySupported);
 
 		// Combine all unsupported files
 		const allUnsupportedFiles = [...generallyUnsupported, ...unsupportedFiles];
@@ -191,7 +192,7 @@
 		if (navigating) {
 			scrollChatToBottom('instant');
 		}
-	})
+	});
 
 	$effect(() => {
 		if (isLoading() && autoScrollEnabled) {
@@ -236,6 +237,12 @@
 			</div>
 		</div>
 	</div>
+{:else if hasServerError}
+	<!-- Server Error State -->
+	<ServerErrorSplash error={hasServerError} />
+{:else if isServerLoading}
+	<!-- Server Loading State -->
+	<ServerLoadingSplash />
 {:else if serverStore.modelName}
 	<div
 		aria-label="Welcome screen with file drop zone"
@@ -281,7 +288,7 @@
 		<AlertDialog.Content class="max-w-md">
 			<AlertDialog.Header>
 				<AlertDialog.Title>File Upload Error</AlertDialog.Title>
-				<AlertDialog.Description class="text-sm text-muted-foreground">
+				<AlertDialog.Description class="text-muted-foreground text-sm">
 					Some files cannot be uploaded with the current model.
 				</AlertDialog.Description>
 			</AlertDialog.Header>
@@ -290,12 +297,16 @@
 				<!-- Generally unsupported files -->
 				{#if fileErrorData.generallyUnsupported.length > 0}
 					<div class="space-y-2">
-						<h4 class="text-sm font-medium text-destructive">Unsupported File Types</h4>
+						<h4 class="text-destructive text-sm font-medium">Unsupported File Types</h4>
 						<div class="space-y-1">
 							{#each fileErrorData.generallyUnsupported as file}
-								<div class="rounded-md bg-destructive/10 px-3 py-2">
-									<p class="text-sm font-mono text-destructive break-all">{file.name}</p>
-									<p class="text-xs text-muted-foreground mt-1">File type not supported</p>
+								<div class="bg-destructive/10 rounded-md px-3 py-2">
+									<p class="text-destructive break-all font-mono text-sm">
+										{file.name}
+									</p>
+									<p class="text-muted-foreground mt-1 text-xs">
+										File type not supported
+									</p>
 								</div>
 							{/each}
 						</div>
@@ -305,13 +316,18 @@
 				<!-- Modality-restricted files -->
 				{#if fileErrorData.modalityUnsupported.length > 0}
 					<div class="space-y-2">
-						<h4 class="text-sm font-medium text-destructive">Model Compatibility Issues</h4>
+						<h4 class="text-destructive text-sm font-medium">
+							Model Compatibility Issues
+						</h4>
 						<div class="space-y-1">
 							{#each fileErrorData.modalityUnsupported as file}
-								<div class="rounded-md bg-destructive/10 px-3 py-2">
-									<p class="text-sm font-mono text-destructive break-all">{file.name}</p>
-									<p class="text-xs text-muted-foreground mt-1">
-										{fileErrorData.modalityReasons[file.name] || 'Not supported by current model'}
+								<div class="bg-destructive/10 rounded-md px-3 py-2">
+									<p class="text-destructive break-all font-mono text-sm">
+										{file.name}
+									</p>
+									<p class="text-muted-foreground mt-1 text-xs">
+										{fileErrorData.modalityReasons[file.name] ||
+											'Not supported by current model'}
 									</p>
 								</div>
 							{/each}
@@ -320,16 +336,16 @@
 				{/if}
 
 				<!-- Supported file types -->
-				<div class="rounded-md bg-muted/50 p-3">
-					<h4 class="text-sm font-medium mb-2">This model supports:</h4>
-					<p class="text-sm text-muted-foreground">
+				<div class="bg-muted/50 rounded-md p-3">
+					<h4 class="mb-2 text-sm font-medium">This model supports:</h4>
+					<p class="text-muted-foreground text-sm">
 						{fileErrorData.supportedTypes.join(', ')}
 					</p>
 				</div>
 			</div>
 
 			<AlertDialog.Footer>
-				<AlertDialog.Action onclick={() => showFileErrorDialog = false}>
+				<AlertDialog.Action onclick={() => (showFileErrorDialog = false)}>
 					Got it
 				</AlertDialog.Action>
 			</AlertDialog.Footer>

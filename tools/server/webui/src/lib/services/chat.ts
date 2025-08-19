@@ -134,7 +134,29 @@ export class ChatService {
 			});
 
 			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
+				let errorMessage = `Server error (${response.status})`;
+
+				switch (response.status) {
+					case 400:
+						errorMessage = 'Invalid request - check your message format';
+						break;
+					case 401:
+						errorMessage = 'Unauthorized - check server authentication';
+						break;
+					case 404:
+						errorMessage = 'Chat endpoint not found - server may not support chat completions';
+						break;
+					case 500:
+						errorMessage = 'Server internal error - check server logs';
+						break;
+					case 503:
+						errorMessage = 'Server unavailable - try again later';
+						break;
+					default:
+						errorMessage = `Server error (${response.status}): ${response.statusText}`;
+				}
+
+				throw new Error(errorMessage);
 			}
 
 			if (stream) {
@@ -150,14 +172,31 @@ export class ChatService {
 			}
 		} catch (error) {
 			if (error instanceof Error && error.name === 'AbortError') {
+				console.log('Chat completion request was aborted');
 				return;
 			}
 
-			const err = error instanceof Error ? error : new Error('Unknown error');
+			// Handle network errors with user-friendly messages
+			let friendlyError: Error;
+			if (error instanceof Error) {
+				if (error.name === 'TypeError' && error.message.includes('fetch')) {
+					friendlyError = new Error('Unable to connect to server - please check if the server is running');
+				} else if (error.message.includes('ECONNREFUSED')) {
+					friendlyError = new Error('Connection refused - server may be offline');
+				} else if (error.message.includes('ETIMEDOUT')) {
+					friendlyError = new Error('Request timeout - server may be overloaded');
+				} else {
+					friendlyError = error;
+				}
+			} else {
+				friendlyError = new Error('Unknown error occurred while sending message');
+			}
 
-			onError?.(err);
-
-			throw err;
+			console.error('Error in sendMessage:', error);
+			if (onError) {
+				onError(friendlyError);
+			}
+			throw friendlyError;
 		}
 	}
 
@@ -193,6 +232,7 @@ export class ChatService {
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		let regularContent = '';
 		let insideThinkTag = false;
+		let hasReceivedData = false;
 
 		const toolCallBuffer = new Map<number, ApiToolCall>();
 		const flushToolCalls = () => {
@@ -217,6 +257,14 @@ export class ChatService {
 					if (line.startsWith('data: ')) {
 						const data = line.slice(6);
 						if (data === '[DONE]') {
+							// Check if we received any actual content
+							if (!hasReceivedData && fullResponse.length === 0) {
+								// Empty response - likely a context error
+								const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
+								contextError.name = 'ContextError';
+								onError?.(contextError);
+								return;
+							}
 							flushToolCalls();
 							onComplete?.(fullResponse);
 							return;
@@ -248,6 +296,7 @@ export class ChatService {
 
 							const content = delta?.content ?? '';
 							if (content) {
+								hasReceivedData = true;
 								fullResponse += content;
 
 								// Process content character by character to handle think tags
@@ -273,6 +322,14 @@ export class ChatService {
 						}
 					}
 				}
+			}
+
+			// If we reach here without receiving [DONE] and no data, it's likely a context error
+			if (!hasReceivedData && fullResponse.length === 0) {
+				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
+				contextError.name = 'ContextError';
+				onError?.(contextError);
+				return;
 			}
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error('Stream error');
@@ -303,16 +360,39 @@ export class ChatService {
 	    onToolCalls?: (calls: ApiToolCall[]) => void
 	): Promise<string> {
 		try {
-			const data: ApiChatCompletionResponse = await response.json();
+			// Check if response body is empty
+			const responseText = await response.text();
+			if (!responseText.trim()) {
+				// Empty response - likely a context error
+				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
+				contextError.name = 'ContextError';
+				onError?.(contextError);
+				throw contextError;
+			}
+
+			const data: ApiChatCompletionResponse = JSON.parse(responseText);
 			const content = data.choices[0]?.message?.content || '';
 
-			const toolCalls = choice?.message?.tool_calls;
+			const toolCalls = data.choices[0]?.message?.tool_calls;
 			if (toolCalls?.length) onToolCalls?.(toolCalls);
+
+			// Check if content is empty even with valid JSON structure
+			if (!content.trim()) {
+				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
+				contextError.name = 'ContextError';
+				onError?.(contextError);
+				throw contextError;
+			}
 
 			onComplete?.(content);
 
 			return content;
 		} catch (error) {
+			// If it's already a ContextError, re-throw it
+			if (error instanceof Error && error.name === 'ContextError') {
+				throw error;
+			}
+
 			const err = error instanceof Error ? error : new Error('Parse error');
 
 			onError?.(err);
@@ -356,10 +436,7 @@ export class ChatService {
 		}
 
 		// Add image files
-		const imageFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile =>
-				extra.type === 'imageFile'
-		);
+		const imageFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile => extra.type === 'imageFile');
 
 		for (const image of imageFiles) {
 			contentParts.push({
@@ -369,10 +446,7 @@ export class ChatService {
 		}
 
 		// Add text files as additional text content
-		const textFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile =>
-				extra.type === 'textFile'
-		);
+		const textFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile => extra.type === 'textFile');
 
 		for (const textFile of textFiles) {
 			contentParts.push({
@@ -382,10 +456,7 @@ export class ChatService {
 		}
 
 		// Add audio files
-		const audioFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile =>
-				extra.type === 'audioFile'
-		);
+		const audioFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile => extra.type === 'audioFile');
 
 		for (const audio of audioFiles) {
 			contentParts.push({
@@ -398,10 +469,7 @@ export class ChatService {
 		}
 
 		// Add PDF files as text content
-		const pdfFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile =>
-				extra.type === 'pdfFile'
-		);
+		const pdfFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile => extra.type === 'pdfFile');
 
 		for (const pdfFile of pdfFiles) {
 			if (pdfFile.processedAsImages && pdfFile.images) {
