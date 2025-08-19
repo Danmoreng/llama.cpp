@@ -1,5 +1,16 @@
 import { config } from '$lib/stores/settings.svelte';
-import type { ApiFunctionTool, ApiToolCall, ApiToolChoice } from '$lib/types/api';
+import type {
+	ApiChatCompletionRequest,
+	ApiChatCompletionResponse,
+	ApiChatCompletionStreamChunk,
+	ApiChatMessageContentPart,
+	ApiChatMessageData,
+	ApiFunctionTool,
+	ApiRequestMessage,
+	ApiToolCall,
+	ApiToolChoice,
+	ApiToolMessageData
+} from '$lib/types/api';
 
 type ToolOptions = {
 	tools?: ApiFunctionTool[];
@@ -70,10 +81,7 @@ export class ChatService {
 		// Build base request body with system message injection
 		const processedMessages = this.injectSystemMessage(messages);
 		const requestBody: ApiChatCompletionRequest = {
-			messages: processedMessages.map((msg: ApiChatMessageData) => ({
-				role: msg.role,
-				content: msg.content
-			})),
+			messages: processedMessages,
 			stream
 		};
 
@@ -144,7 +152,8 @@ export class ChatService {
 						errorMessage = 'Unauthorized - check server authentication';
 						break;
 					case 404:
-						errorMessage = 'Chat endpoint not found - server may not support chat completions';
+						errorMessage =
+							'Chat endpoint not found - server may not support chat completions';
 						break;
 					case 500:
 						errorMessage = 'Server internal error - check server logs';
@@ -180,7 +189,9 @@ export class ChatService {
 			let friendlyError: Error;
 			if (error instanceof Error) {
 				if (error.name === 'TypeError' && error.message.includes('fetch')) {
-					friendlyError = new Error('Unable to connect to server - please check if the server is running');
+					friendlyError = new Error(
+						'Unable to connect to server - please check if the server is running'
+					);
 				} else if (error.message.includes('ECONNREFUSED')) {
 					friendlyError = new Error('Connection refused - server may be offline');
 				} else if (error.message.includes('ETIMEDOUT')) {
@@ -233,6 +244,7 @@ export class ChatService {
 		let regularContent = '';
 		let insideThinkTag = false;
 		let hasReceivedData = false;
+		let sawToolCalls = false;
 
 		const toolCallBuffer = new Map<number, ApiToolCall>();
 		const flushToolCalls = () => {
@@ -240,7 +252,7 @@ export class ChatService {
 			const calls = Array.from(toolCallBuffer.entries())
 				.sort((a, b) => a[0] - b[0])
 				.map(([, v]) => v)
-				.filter((c) => c.function?.name); // only emit if name exists
+				.filter((c) => c.function?.name);
 			if (calls.length) onToolCalls?.(calls);
 			toolCallBuffer.clear();
 		};
@@ -254,88 +266,93 @@ export class ChatService {
 				const lines = chunk.split('\n');
 
 				for (const line of lines) {
-					if (line.startsWith('data: ')) {
-						const data = line.slice(6);
-						if (data === '[DONE]') {
-							// Check if we received any actual content
-							if (!hasReceivedData && fullResponse.length === 0) {
-								// Empty response - likely a context error
-								const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
-								contextError.name = 'ContextError';
-								onError?.(contextError);
-								return;
-							}
-							flushToolCalls();
-							onComplete?.(fullResponse);
+					if (!line.startsWith('data: ')) continue;
+					const data = line.slice(6);
+					if (data === '[DONE]') {
+						// ✅ End of stream. If we saw tool calls OR any text, this is NOT a context error.
+						flushToolCalls();
+						if (!hasReceivedData && !sawToolCalls) {
+							const contextError = new Error(
+								'The request exceeds the available context size. Try increasing the context size or enable context shift.'
+							);
+							(contextError as any).name = 'ContextError';
+							onError?.(contextError as Error);
 							return;
 						}
+						onComplete?.(fullResponse);
+						return;
+					}
 
-						try {
-							const parsed: ApiChatCompletionStreamChunk = JSON.parse(data);
-							const choice = parsed.choices?.[0];
-							const delta = choice?.delta;
+					try {
+						const parsed: ApiChatCompletionStreamChunk = JSON.parse(data);
+						const choice = parsed.choices?.[0];
+						const delta = choice?.delta;
 
-							if (delta?.tool_calls?.length) {
-								for (const tc of delta.tool_calls) {
-									const idx = tc.index ?? 0;
-									let entry = toolCallBuffer.get(idx);
-									if (!entry) {
-										entry = {
-											id: undefined,
-											type: 'function',
-											function: { name: '', arguments: '' }
-										};
-										toolCallBuffer.set(idx, entry);
-									}
-									if (tc.id) entry.id = tc.id;
-									if (tc.function?.name) entry.function.name = tc.function.name;
-									if (tc.function?.arguments)
-										entry.function.arguments += tc.function.arguments;
+						if (delta?.tool_calls?.length) {
+							sawToolCalls = true;
+							for (const tc of delta.tool_calls) {
+								const idx = tc.index ?? 0;
+								let entry = toolCallBuffer.get(idx);
+								if (!entry) {
+									entry = {
+										id: undefined,
+										type: 'function',
+										function: { name: '', arguments: '' }
+									};
+									toolCallBuffer.set(idx, entry);
 								}
+								if (tc.id) entry.id = tc.id;
+								if (tc.function?.name) entry.function.name = tc.function.name;
+								if (tc.function?.arguments)
+									entry.function.arguments += tc.function.arguments;
 							}
-
-							const content = delta?.content ?? '';
-							if (content) {
-								hasReceivedData = true;
-								fullResponse += content;
-
-								// Process content character by character to handle think tags
-								insideThinkTag = this.processContentForThinkTags(
-									content,
-									insideThinkTag,
-									(thinkChunk) => {
-										thinkContent += thinkChunk;
-									},
-									(regularChunk) => {
-										regularContent += regularChunk;
-									}
-								);
-
-								onChunk?.(content);
-							}
-							// If model finishes specifically for tool calls, emit immediately
-							if (choice?.finish_reason === 'tool_calls') {
-								flushToolCalls();
-							}
-						} catch (e) {
-							console.error('Error parsing JSON chunk:', e);
 						}
+
+						const content = delta?.content ?? '';
+						if (content) {
+							hasReceivedData = true;
+							fullResponse += content;
+
+							// Process content character by character to handle think tags
+							insideThinkTag = this.processContentForThinkTags(
+								content,
+								insideThinkTag,
+								(thinkChunk) => {
+									thinkContent += thinkChunk;
+								},
+								(regularChunk) => {
+									regularContent += regularChunk;
+								}
+							);
+
+							onChunk?.(content);
+						}
+						// If model finishes specifically for tool calls, emit immediately
+						if (choice?.finish_reason === 'tool_calls') {
+							flushToolCalls();
+						}
+					} catch (e) {
+						console.error('Error parsing JSON chunk:', e);
 					}
 				}
 			}
 
-			// If we reach here without receiving [DONE] and no data, it's likely a context error
-			if (!hasReceivedData && fullResponse.length === 0) {
-				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
-				contextError.name = 'ContextError';
-				onError?.(contextError);
+			// Stream ended without [DONE]. Treat as error only if we truly saw nothing.
+			if (!hasReceivedData && !sawToolCalls) {
+				const contextError = new Error(
+					'The request exceeds the available context size. Try increasing the context size or enable context shift.'
+				);
+				(contextError as any).name = 'ContextError';
+				onError?.(contextError as Error);
 				return;
 			}
+
+			// Be lenient: flush any buffered calls and complete.
+			flushToolCalls();
+			onComplete?.(fullResponse);
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error('Stream error');
-
 			onError?.(err);
-
 			throw err;
 		} finally {
 			reader.releaseLock();
@@ -357,46 +374,49 @@ export class ChatService {
 		response: Response,
 		onComplete?: (response: string) => void,
 		onError?: (error: Error) => void,
-	    onToolCalls?: (calls: ApiToolCall[]) => void
+		onToolCalls?: (calls: ApiToolCall[]) => void
 	): Promise<string> {
 		try {
-			// Check if response body is empty
 			const responseText = await response.text();
 			if (!responseText.trim()) {
-				// Empty response - likely a context error
-				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
-				contextError.name = 'ContextError';
-				onError?.(contextError);
+				// True empty body → keep as real context error
+				const contextError = new Error(
+					'The request exceeds the available context size. Try increasing the context size or enable context shift.'
+				);
+				(contextError as any).name = 'ContextError';
+				onError?.(contextError as Error);
 				throw contextError;
 			}
 
 			const data: ApiChatCompletionResponse = JSON.parse(responseText);
-			const content = data.choices[0]?.message?.content || '';
+			const msg = data.choices?.[0]?.message;
+			const content = msg?.content ?? '';
+			const toolCalls = msg?.tool_calls ?? [];
 
-			const toolCalls = data.choices[0]?.message?.tool_calls;
-			if (toolCalls?.length) onToolCalls?.(toolCalls);
+			if (toolCalls.length) onToolCalls?.(toolCalls);
 
-			// Check if content is empty even with valid JSON structure
-			if (!content.trim()) {
-				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
-				contextError.name = 'ContextError';
-				onError?.(contextError);
+			// If tool calls exist, an empty content is OK. Do NOT raise ContextError.
+			if (!content.trim() && toolCalls.length) {
+				onComplete?.(''); // allow the outer loop to continue with tools
+				return '';
+			}
+
+			// If no content and no tool calls → likely a real context issue
+			if (!content.trim() && !toolCalls.length) {
+				const contextError = new Error(
+					'The request exceeds the available context size. Try increasing the context size or enable context shift.'
+				);
+				(contextError as any).name = 'ContextError';
+				onError?.(contextError as Error);
 				throw contextError;
 			}
 
 			onComplete?.(content);
-
 			return content;
 		} catch (error) {
-			// If it's already a ContextError, re-throw it
-			if (error instanceof Error && error.name === 'ContextError') {
-				throw error;
-			}
-
+			if (error instanceof Error && error.name === 'ContextError') throw error;
 			const err = error instanceof Error ? error : new Error('Parse error');
-
 			onError?.(err);
-
 			throw err;
 		}
 	}
@@ -415,83 +435,97 @@ export class ChatService {
 	 */
 	static convertMessageToChatServiceData(
 		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
-	): ApiChatMessageData {
-		// If no extras, return simple text message
-		if (!message.extra || message.extra.length === 0) {
+	): ApiRequestMessage {
+		// (A) TOOL RESULT MESSAGE
+		if (message.role === 'tool') {
 			return {
-				role: message.role as 'user' | 'assistant' | 'system',
-				content: message.content
+				role: 'tool',
+				content: message.content ?? '',
+				tool_call_id: (message as any).toolCallId ?? undefined,
+				name: (message as any).toolName ?? undefined
 			};
 		}
 
-		// Build multimodal content array
+		// Build multimodal content array if extras exist
+		const hasExtras = Array.isArray(message.extra) && message.extra.length > 0;
 		const contentParts: ApiChatMessageContentPart[] = [];
 
-		// Add text content first
-		if (message.content) {
-			contentParts.push({
-				type: 'text',
-				text: message.content
-			});
-		}
+		if (hasExtras) {
+			if (message.content) {
+				contentParts.push({ type: 'text', text: message.content });
+			}
 
-		// Add image files
-		const imageFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile => extra.type === 'imageFile');
+			const imageFiles = (message.extra || []).filter(
+				(e: DatabaseMessageExtra): e is DatabaseMessageExtraImageFile =>
+					e.type === 'imageFile'
+			);
+			for (const image of imageFiles) {
+				contentParts.push({ type: 'image_url', image_url: { url: image.base64Url } });
+			}
 
-		for (const image of imageFiles) {
-			contentParts.push({
-				type: 'image_url',
-				image_url: { url: image.base64Url }
-			});
-		}
-
-		// Add text files as additional text content
-		const textFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile => extra.type === 'textFile');
-
-		for (const textFile of textFiles) {
-			contentParts.push({
-				type: 'text',
-				text: `\n\n--- File: ${textFile.name} ---\n${textFile.content}`
-			});
-		}
-
-		// Add audio files
-		const audioFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile => extra.type === 'audioFile');
-
-		for (const audio of audioFiles) {
-			contentParts.push({
-				type: 'input_audio',
-				input_audio: {
-					data: audio.base64Data,
-					format: audio.mimeType.includes('wav') ? 'wav' : 'mp3'
-				}
-			});
-		}
-
-		// Add PDF files as text content
-		const pdfFiles = message.extra.filter((extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile => extra.type === 'pdfFile');
-
-		for (const pdfFile of pdfFiles) {
-			if (pdfFile.processedAsImages && pdfFile.images) {
-				// If PDF was processed as images, add each page as an image
-				for (let i = 0; i < pdfFile.images.length; i++) {
-					contentParts.push({
-						type: 'image_url',
-						image_url: { url: pdfFile.images[i] }
-					});
-				}
-			} else {
-				// If PDF was processed as text, add as text content
+			const textFiles = (message.extra || []).filter(
+				(e: DatabaseMessageExtra): e is DatabaseMessageExtraTextFile =>
+					e.type === 'textFile'
+			);
+			for (const t of textFiles) {
 				contentParts.push({
 					type: 'text',
-					text: `\n\n--- PDF File: ${pdfFile.name} ---\n${pdfFile.content}`
+					text: `\n\n--- File: ${t.name} ---\n${t.content}`
 				});
+			}
+
+			const audioFiles = (message.extra || []).filter(
+				(e: DatabaseMessageExtra): e is DatabaseMessageExtraAudioFile =>
+					e.type === 'audioFile'
+			);
+			for (const a of audioFiles) {
+				contentParts.push({
+					type: 'input_audio',
+					input_audio: {
+						data: a.base64Data,
+						format: a.mimeType.includes('wav') ? 'wav' : 'mp3'
+					}
+				});
+			}
+
+			const pdfFiles = (message.extra || []).filter(
+				(e: DatabaseMessageExtra): e is DatabaseMessageExtraPdfFile => e.type === 'pdfFile'
+			);
+			for (const p of pdfFiles) {
+				if (p.processedAsImages && p.images?.length) {
+					for (const img of p.images) {
+						contentParts.push({ type: 'image_url', image_url: { url: img } });
+					}
+				} else {
+					contentParts.push({
+						type: 'text',
+						text: `\n\n--- PDF File: ${p.name} ---\n${p.content}`
+					});
+				}
 			}
 		}
 
+		// (B) ASSISTANT TOOL CALL MESSAGE
+		const toolCalls = (message as any).toolCalls as
+			| Array<{ id: string; type: 'function'; name: string; arguments: string }>
+			| undefined;
+
+		if (message.role === 'assistant' && toolCalls?.length) {
+			return {
+				role: 'assistant',
+				content: message.content ?? '',
+				tool_calls: toolCalls.map((tc) => ({
+					id: tc.id,
+					type: 'function',
+					function: { name: tc.name, arguments: tc.arguments }
+				}))
+			} as unknown as ApiRequestMessage;
+		}
+
+		// (C) NORMAL SYSTEM/USER/ASSISTANT MESSAGE
 		return {
-			role: message.role as 'user' | 'assistant' | 'system',
-			content: contentParts
+			role: message.role as Exclude<ChatRole, 'tool'>,
+			content: hasExtras ? contentParts : (message.content ?? '')
 		};
 	}
 
@@ -511,7 +545,7 @@ export class ChatService {
 	 */
 	async sendChatCompletion(
 		messages:
-			| (ApiChatMessageData[] | DatabaseMessage[])
+			| (ApiRequestMessage[] | DatabaseMessage[])
 			| (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
 		options: {
 			stream?: boolean;
@@ -522,21 +556,18 @@ export class ChatService {
 			onError?: (error: Error) => void;
 		} & ToolOptions = {}
 	): Promise<string | void> {
-		// Handle both array formats and convert messages with extras
-		const normalizedMessages: ApiChatMessageData[] = messages.map((msg) => {
-			// Check if this is already a ApiChatMessageData object by checking for DatabaseMessage-specific fields
+		// Preserve API-shaped objects; convert only DB messages
+		const normalizedMessages: ApiRequestMessage[] = messages.map((msg: any) => {
 			if ('id' in msg && 'convId' in msg && 'timestamp' in msg) {
-				// This is a DatabaseMessage, convert it
-				const dbMsg = msg as DatabaseMessage & { extra?: DatabaseMessageExtra[] };
-				const converted = ChatService.convertMessageToChatServiceData(dbMsg);
-				return converted;
-			} else {
-				// This is already an ApiChatMessageData object
-				return msg as ApiChatMessageData;
+				// DatabaseMessage → ApiRequestMessage
+				return ChatService.convertMessageToChatServiceData(
+					msg as DatabaseMessage & { extra?: DatabaseMessageExtra[] }
+				);
 			}
+			// Already API-shaped (may include tool_calls / tool_call_id)
+			return msg as ApiRequestMessage;
 		});
 
-		// Set default options for API compatibility
 		const finalOptions = {
 			stream: true,
 			temperature: 0.7,
@@ -670,21 +701,15 @@ export class ChatService {
 	 * @returns Array of messages with system message injected at the beginning if configured
 	 * @private
 	 */
-	private injectSystemMessage(messages: ApiChatMessageData[]): ApiChatMessageData[] {
+	private injectSystemMessage(messages: ApiRequestMessage[]): ApiRequestMessage[] {
 		const currentConfig = config();
 		const systemMessage = currentConfig.systemMessage?.toString().trim();
+		if (!systemMessage) return messages;
 
-		// If no system message is configured, return messages as-is
-		if (!systemMessage) {
-			return messages;
-		}
+		const first = messages[0] as any;
+		if (first && first.role === 'system') return messages;
 
-		// Check if first message is already a system message
-		const first = messages[0];
-		if (first && 'role' in first && (first as any).role === 'system') return messages;
-
-		const systemMsg: ApiChatMessageData = { role: 'system', content: systemMessage };
-
+		const systemMsg: ApiRequestMessage = { role: 'system', content: systemMessage };
 		return [systemMsg, ...messages];
 	}
 }

@@ -151,10 +151,7 @@ export type ApiRequestMessage =
 	| ApiToolMessageData;
 
 export interface ApiChatCompletionRequest {
-	messages: Array<{
-		role: ChatRole;
-		content: string | ApiChatMessageContentPart[];
-	}>;
+	messages: ApiRequestMessage[];
 	stream?: boolean;
 	// Generation parameters
 	temperature?: number;
