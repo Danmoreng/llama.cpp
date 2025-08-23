@@ -174,7 +174,8 @@ export class ChatService {
 					onChunk,
 					onComplete,
 					onError,
-					onToolCalls
+					onToolCalls,
+					options.onReasoningChunk
 				);
 			} else {
 				return this.handleNonStreamResponse(response, onComplete, onError, onToolCalls);
@@ -220,15 +221,17 @@ export class ChatService {
 	 * @param onComplete - Optional callback invoked when the stream is complete with full response
 	 * @param onError - Optional callback invoked if an error occurs during streaming
 	 * @param onToolCalls - Optional callback invoked when model chooses tool call(s)
+	 * @param onReasoningChunk - Optional callback invoked for each reasoning content chunk
 	 * @returns {Promise<void>} Promise that resolves when streaming is complete
 	 * @throws {Error} if the stream cannot be read or parsed
 	 */
 	private async handleStreamResponse(
 		response: Response,
 		onChunk?: (chunk: string) => void,
-		onComplete?: (response: string) => void,
+		onComplete?: (response: string, reasoningContent?: string) => void,
 		onError?: (error: Error) => void,
-		onToolCalls?: (calls: ApiToolCall[]) => void
+		onToolCalls?: (calls: ApiToolCall[]) => void,
+		onReasoningChunk?: (chunk: string) => void
 	): Promise<void> {
 		const reader = response.body?.getReader();
 
@@ -238,6 +241,7 @@ export class ChatService {
 
 		const decoder = new TextDecoder();
 		let fullResponse = '';
+		let fullReasoningContent = '';
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		let thinkContent = '';
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -279,7 +283,7 @@ export class ChatService {
 							onError?.(contextError as Error);
 							return;
 						}
-						onComplete?.(fullResponse);
+						onComplete?.(regularContent, fullReasoningContent || undefined);
 						return;
 					}
 
@@ -287,6 +291,7 @@ export class ChatService {
 						const parsed: ApiChatCompletionStreamChunk = JSON.parse(data);
 						const choice = parsed.choices?.[0];
 						const delta = choice?.delta;
+						const reasoningContent = delta?.reasoning_content;
 
 						if (delta?.tool_calls?.length) {
 							sawToolCalls = true;
@@ -313,6 +318,9 @@ export class ChatService {
 							hasReceivedData = true;
 							fullResponse += content;
 
+							// Track the regular content before processing this chunk
+							const regularContentBefore = regularContent;
+
 							// Process content character by character to handle think tags
 							insideThinkTag = this.processContentForThinkTags(
 								content,
@@ -325,8 +333,18 @@ export class ChatService {
 								}
 							);
 
-							onChunk?.(content);
+							// Only send the new regular content that was added in this chunk
+							const newRegularContent = regularContent.slice(regularContentBefore.length);
+							if (newRegularContent) {
+								onChunk?.(newRegularContent);
+							}
 						}
+						if (reasoningContent) {
+							hasReceivedData = true;
+							fullReasoningContent += reasoningContent;
+							onReasoningChunk?.(reasoningContent);
+						}
+
 						// If model finishes specifically for tool calls, emit immediately
 						if (choice?.finish_reason === 'tool_calls') {
 							flushToolCalls();
@@ -342,7 +360,7 @@ export class ChatService {
 				const contextError = new Error(
 					'The request exceeds the available context size. Try increasing the context size or enable context shift.'
 				);
-				(contextError as any).name = 'ContextError';
+				contextError.name = 'ContextError';
 				onError?.(contextError as Error);
 				return;
 			}
@@ -372,26 +390,30 @@ export class ChatService {
 	 */
 	private async handleNonStreamResponse(
 		response: Response,
-		onComplete?: (response: string) => void,
+		onComplete?: (response: string, reasoningContent?: string) => void,
 		onError?: (error: Error) => void,
 		onToolCalls?: (calls: ApiToolCall[]) => void
 	): Promise<string> {
 		try {
+			// Check if response body is empty
 			const responseText = await response.text();
 			if (!responseText.trim()) {
-				// True empty body → keep as real context error
-				const contextError = new Error(
-					'The request exceeds the available context size. Try increasing the context size or enable context shift.'
-				);
-				(contextError as any).name = 'ContextError';
-				onError?.(contextError as Error);
+				// Empty response - likely a context error
+				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
+				contextError.name = 'ContextError';
+				onError?.(contextError);
 				throw contextError;
 			}
 
 			const data: ApiChatCompletionResponse = JSON.parse(responseText);
 			const msg = data.choices?.[0]?.message;
 			const content = msg?.content ?? '';
+			const reasoningContent = msg?.reasoning_content;
 			const toolCalls = msg?.tool_calls ?? [];
+
+			if (reasoningContent) {
+				console.log('Full reasoning content:', reasoningContent);
+			}
 
 			if (toolCalls.length) onToolCalls?.(toolCalls);
 
@@ -411,12 +433,19 @@ export class ChatService {
 				throw contextError;
 			}
 
-			onComplete?.(content);
+			onComplete?.(content, reasoningContent);
+
 			return content;
 		} catch (error) {
-			if (error instanceof Error && error.name === 'ContextError') throw error;
+			// If it's already a ContextError, re-throw it
+			if (error instanceof Error && error.name === 'ContextError') {
+				throw error;
+			}
+
 			const err = error instanceof Error ? error : new Error('Parse error');
+
 			onError?.(err);
+
 			throw err;
 		}
 	}
@@ -467,10 +496,10 @@ export class ChatService {
 				(e: DatabaseMessageExtra): e is DatabaseMessageExtraTextFile =>
 					e.type === 'textFile'
 			);
-			for (const t of textFiles) {
+			for (const textFile of textFiles) {
 				contentParts.push({
 					type: 'text',
-					text: `\n\n--- File: ${t.name} ---\n${t.content}`
+					text: `\n\n--- File: ${textFile.name} ---\n${textFile.content}`
 				});
 			}
 
@@ -478,12 +507,12 @@ export class ChatService {
 				(e: DatabaseMessageExtra): e is DatabaseMessageExtraAudioFile =>
 					e.type === 'audioFile'
 			);
-			for (const a of audioFiles) {
+			for (const audio of audioFiles) {
 				contentParts.push({
 					type: 'input_audio',
 					input_audio: {
-						data: a.base64Data,
-						format: a.mimeType.includes('wav') ? 'wav' : 'mp3'
+						data: audio.base64Data,
+						format: audio.mimeType.includes('wav') ? 'wav' : 'mp3'
 					}
 				});
 			}
@@ -491,15 +520,20 @@ export class ChatService {
 			const pdfFiles = (message.extra || []).filter(
 				(e: DatabaseMessageExtra): e is DatabaseMessageExtraPdfFile => e.type === 'pdfFile'
 			);
-			for (const p of pdfFiles) {
-				if (p.processedAsImages && p.images?.length) {
-					for (const img of p.images) {
-						contentParts.push({ type: 'image_url', image_url: { url: img } });
+			for (const pdfFile of pdfFiles) {
+				if (pdfFile.processedAsImages && pdfFile.images) {
+					// If PDF was processed as images, add each page as an image
+					for (let i = 0; i < pdfFile.images.length; i++) {
+						contentParts.push({
+							type: 'image_url',
+							image_url: { url: pdfFile.images[i] }
+						});
 					}
 				} else {
+					// If PDF was processed as text, add as text content
 					contentParts.push({
 						type: 'text',
-						text: `\n\n--- PDF File: ${p.name} ---\n${p.content}`
+						text: `\n\n--- PDF File: ${pdfFile.name} ---\n${pdfFile.content}`
 					});
 				}
 			}
@@ -552,7 +586,8 @@ export class ChatService {
 			temperature?: number;
 			max_tokens?: number;
 			onChunk?: (chunk: string) => void;
-			onComplete?: (response?: string) => void;
+			onReasoningChunk?: (chunk: string) => void;
+			onComplete?: (response?: string, reasoningContent?: string) => void;
 			onError?: (error: Error) => void;
 		} & ToolOptions = {}
 	): Promise<string | void> {
@@ -568,6 +603,7 @@ export class ChatService {
 			return msg as ApiRequestMessage;
 		});
 
+		// Set default options for API compatibility
 		const finalOptions = {
 			stream: true,
 			temperature: 0.7,
@@ -704,12 +740,23 @@ export class ChatService {
 	private injectSystemMessage(messages: ApiRequestMessage[]): ApiRequestMessage[] {
 		const currentConfig = config();
 		const systemMessage = currentConfig.systemMessage?.toString().trim();
-		if (!systemMessage) return messages;
 
-		const first = messages[0] as any;
-		if (first && first.role === 'system') return messages;
+		// If no system message is configured, return messages as-is
+		if (!systemMessage) {
+			return messages;
+		}
 
-		const systemMsg: ApiRequestMessage = { role: 'system', content: systemMessage };
+		// Check if first message is already a system message
+		if (messages.length > 0 && messages[0].role === 'system') {
+			return messages;
+		}
+
+		// Inject system message at the beginning
+		const systemMsg: ApiChatMessageData = {
+			role: 'system',
+			content: systemMessage
+		};
+
 		return [systemMsg, ...messages];
 	}
 }
