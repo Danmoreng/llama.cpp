@@ -153,6 +153,8 @@ export type ApiRequestMessage =
 export interface ApiChatCompletionRequest {
 	messages: ApiRequestMessage[];
 	stream?: boolean;
+	// Reasoning parameters
+	reasoning_format?: string;
 	// Generation parameters
 	temperature?: number;
 	max_tokens?: number;
@@ -190,6 +192,7 @@ export interface ApiChatCompletionStreamChunk {
 			role?: 'assistant';
 			content?: string | null;
 			tool_calls?: ApiToolCallDelta[];
+			reasoning_content?: string;
 		};
 		finish_reason?: ApiFinishReason | null;
 	}>;
@@ -208,6 +211,7 @@ export interface ApiChatCompletionResponse {
 			role: 'assistant';
 			content?: string | null;
 			tool_calls?: ApiToolCall[];
+			reasoning_content?: string;
 		};
 		finish_reason?: ApiFinishReason | null;
 	}>;
