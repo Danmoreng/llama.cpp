@@ -134,12 +134,17 @@ class ChatStore {
 		onError?: (error: Error) => void
 	): Promise<void> {
 		let streamedContent = '';
+
+		// Get current settings
 		const currentConfig = config();
 
+		// Build complete options from settings
 		const apiOptions = {
 			stream: true,
+			// Generation parameters
 			temperature: Number(currentConfig.temperature) || 0.8,
 			max_tokens: Number(currentConfig.max_tokens) || 2048,
+			// Sampling parameters
 			dynatemp_range: Number(currentConfig.dynatemp_range) || 0.0,
 			dynatemp_exponent: Number(currentConfig.dynatemp_exponent) || 1.0,
 			top_k: Number(currentConfig.top_k) || 40,
@@ -148,6 +153,7 @@ class ChatStore {
 			xtc_probability: Number(currentConfig.xtc_probability) || 0.0,
 			xtc_threshold: Number(currentConfig.xtc_threshold) || 0.1,
 			typical_p: Number(currentConfig.typical_p) || 1.0,
+			// Penalty parameters
 			repeat_last_n: Number(currentConfig.repeat_last_n) || 64,
 			repeat_penalty: Number(currentConfig.repeat_penalty) || 1.0,
 			presence_penalty: Number(currentConfig.presence_penalty) || 0.0,
@@ -156,9 +162,12 @@ class ChatStore {
 			dry_base: Number(currentConfig.dry_base) || 1.75,
 			dry_allowed_length: Number(currentConfig.dry_allowed_length) || 2,
 			dry_penalty_last_n: Number(currentConfig.dry_penalty_last_n) || -1,
+			// Sampler configuration
 			samplers: currentConfig.samplers || 'top_k;tfs_z;typical_p;top_p;min_p;temperature',
-			custom: currentConfig.custom || ''
+			// Custom parameters
+			custom: currentConfig.custom || '',
 		};
+let streamedReasoningContent = '';
 
 		// Helpers
 		const MAX_TOOL_ROUNDS = 10;
@@ -241,6 +250,7 @@ class ChatStore {
 					streamedContent += chunk;
 					this.currentResponse = streamedContent;
 
+					// Parse thinking content during streaming
 					const partialThinking = extractPartialThinking(streamedContent);
 					const clean = partialThinking.remainingContent || streamedContent;
 
@@ -323,8 +333,19 @@ class ChatStore {
 						console.warn('Failed to persist assistant tool_call message:', err);
 					}
 				},
+				onReasoningChunk: (reasoningChunk: string) => {
+					streamedReasoningContent += reasoningChunk;
 
-				onComplete: async () => {
+					const messageIndex = this.activeMessages.findIndex(
+						(m) => m.id === assistantMessage.id
+					);
+
+					if (messageIndex !== -1) {
+						// Update message with reasoning content
+						this.activeMessages[messageIndex].thinking = streamedReasoningContent;
+					}
+				},
+				onComplete: async (finalContent?: string, reasoningContent?: string) => {
 					console.log(
 						'✅ stream complete. Final assembled text length:',
 						streamedContent.length
@@ -364,6 +385,7 @@ class ChatStore {
 				},
 
 				onError: (error: Error) => {
+					// Don't log or show error if it's an AbortError (user stopped generation)
 					if (error.name === 'AbortError' || error instanceof DOMException) {
 						console.log('⛔ Generation aborted by user.');
 						this.isLoading = false;
@@ -372,10 +394,12 @@ class ChatStore {
 						return;
 					}
 
+					// Handle context errors specially
 					if (error.name === 'ContextError') {
 						console.warn('Context error detected:', error.message);
 						this.isLoading = false;
 						this.currentResponse = '';
+
 						slotsService.stopPolling();
 
 						// remove the placeholder created this round if it has no text
@@ -389,14 +413,17 @@ class ChatStore {
 							);
 						}
 
+						// Set context error state to show dialog
 						this.maxContextError = {
 							message: error.message,
-							estimatedTokens: 0,
-							maxContext: 4096
+							estimatedTokens: 0, // Server-side error, we don't have client estimates
+							maxContext: 4096 // Default fallback, will be updated by context service if available
 						};
 
-						if (onError) onError(error);
-						console.groupEnd();
+						// Call custom error handler if provided
+						if (onError) {
+							onError(error);
+						}
 						return;
 					}
 
