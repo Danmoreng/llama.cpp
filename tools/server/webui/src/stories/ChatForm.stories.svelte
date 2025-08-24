@@ -1,7 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import ChatForm from '$lib/components/app/chat/ChatForm/ChatForm.svelte';
-	import { expect } from 'storybook/internal/test';
+	import { expect, screen } from 'storybook/internal/test';
 	import { mockServerProps, mockConfigs } from './fixtures/storybook-mocks';
 	import jpgAsset from './fixtures/assets/1.jpg?url';
   import svgAsset from './fixtures/assets/hf-logo.svg?url';
@@ -26,11 +26,11 @@
 		},
     {
       id: '2',
-      name: '1.svg',
+      name: 'hf-logo.svg',
       type: 'image/svg+xml',
       size: 1234,
       preview: svgAsset,
-      file: new File([''], '1.svg', { type: 'image/svg+xml' })
+      file: new File([''], 'hf-logo.svg', { type: 'image/svg+xml' })
     },
 		{
       id: '3',
@@ -119,12 +119,15 @@
     const audioButton = document.querySelector('.audio-button');
     await expect(audioButton).toHaveAttribute('data-disabled');
 
+    // Fix for dropdown menu side effect
+    const body = document.querySelector('body');
+    if (body) body.style.pointerEvents = 'all';
+
     console.log('✅ Vision modality: Images enabled, Audio/Recording disabled');
   }}
 />
 
-
-<!-- <Story
+<Story
   name="AudioModality"
   args={{ class: 'max-w-[56rem] w-[calc(100vw-2rem)]' }}
   play={async ({ canvas, userEvent }) => {
@@ -150,9 +153,13 @@
     const audioButton = document.querySelector('.audio-button');
     await expect(audioButton).not.toHaveAttribute('data-disabled');
 
+    // Fix for dropdown menu side effect
+    const body = document.querySelector('body');
+    if (body) body.style.pointerEvents = 'all';
+
     console.log('✅ Audio modality: Audio/Recording enabled, Images disabled');
   }}
-/> -->
+/>
 
 <Story
   name="FileAttachments"
@@ -162,6 +169,21 @@
   }}
   play={async ({ canvas }) => {
     mockServerProps(mockConfigs.bothModalities);
-    console.log('✅ File Attachments: Both modalities enabled');
+    
+    const jpgAttachment = canvas.getByAltText('1.jpg');
+    const svgAttachment = canvas.getByAltText('hf-logo.svg');
+    const pdfFileExtension = canvas.getByText('PDF');
+    const pdfAttachment = canvas.getByText('example.pdf');
+    const pdfSize = canvas.getByText('342.82 KB');
+    
+    await expect(jpgAttachment).toBeInTheDocument();
+    await expect(jpgAttachment).toHaveAttribute('src', jpgAsset);
+    
+    await expect(svgAttachment).toBeInTheDocument();
+    await expect(svgAttachment).toHaveAttribute('src', svgAsset);
+    
+    await expect(pdfFileExtension).toBeInTheDocument();
+    await expect(pdfAttachment).toBeInTheDocument();
+    await expect(pdfSize).toBeInTheDocument();
   }}
 />
