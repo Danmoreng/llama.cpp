@@ -10,10 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Created ARCHITECTURE.md with comprehensive documentation of the WebUI architecture
 - Created QWEN.md with collaboration instructions for AI-assisted development
-- Added .env file with VITE_BASE_URL configuration to fix server connection issues
+- Added message deletion functionality allowing users to delete individual messages
+- Added keyboard shortcuts for common actions:
+  - Ctrl/Cmd + K: Create new chat
+  - Ctrl/Cmd + Shift + D: Delete current chat
+- Added tool calling support with client-side tool execution
+- Added editor tools for HTML code manipulation:
+  - Get current editor code
+  - Set editor code
+  - Find and replace in editor code
+- Added integrated HTML code editor with live preview
+- Added visual display of tool calls and results
+- Added database storage for tool calls and tool results
 
 ### Changed
-- None
+- Enhanced chat store to handle tool calling workflows
+- Improved chat service to support tool calling API
+- Updated database schema to include tool call fields
+- Enhanced message editing to properly handle tool calls
+- Improved context error handling to account for tool calls
+- Enhanced streaming response handling to process tool calls
+- Updated UI components to display tool calls and results
+- Improved file upload error handling with better user feedback
 
 ### Deprecated
 - None
