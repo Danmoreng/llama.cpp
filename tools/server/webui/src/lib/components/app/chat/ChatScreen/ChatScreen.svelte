@@ -21,6 +21,8 @@
 	import ChatScreenDragOverlay from './ChatScreenDragOverlay.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
     import CodeEditor from "$lib/components/app/chat/ChatHTMLEditor/CodeEditor.svelte";
+	import { deleteConversation } from '$lib/stores/chat.svelte';
+	import { goto } from '$app/navigation';
 
 
 	let { showCenteredEmpty = false } = $props();
@@ -44,6 +46,8 @@
 		modalityReasons: {},
 		supportedTypes: []
 	});
+
+	let showDeleteDialog = $state(false);
 
 	const isEmpty = $derived(
 		showCenteredEmpty && !activeConversation() && activeMessages().length === 0 && !isLoading()
@@ -179,6 +183,30 @@
 		});
 	}
 
+	function handleKeydown(event: KeyboardEvent) {
+		const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+
+		if (isCtrlOrCmd && event.key === 'k') {
+			event.preventDefault();
+			goto('/?new_chat=true');
+		}
+
+		if (isCtrlOrCmd && event.shiftKey && (event.key === 'd' || event.key === 'D')) {
+			event.preventDefault();
+			if (activeConversation()) {
+				showDeleteDialog = true;
+			}
+		}
+	}
+
+	async function handleDeleteConfirm() {
+		const conversation = activeConversation();
+		if (conversation) {
+			await deleteConversation(conversation.id);
+		}
+		showDeleteDialog = false;
+	}
+
 	$effect(() => {
 		// This solution is not ideal, but it works for now. But can be tricky for long conversations
 		// Eventually we might want to find a proper way to render the content scrolled down from the beginning
@@ -204,6 +232,8 @@
 {#if isDragOver}
 	<ChatScreenDragOverlay />
 {/if}
+
+<svelte:window onkeydown={handleKeydown} />
 
 <ChatScreenHeader />
 <div class="flex flex-row h-full overflow-y-auto">
@@ -344,6 +374,30 @@
 			<AlertDialog.Footer>
 				<AlertDialog.Action onclick={() => (showFileErrorDialog = false)}>
 					Got it
+				</AlertDialog.Action>
+			</AlertDialog.Footer>
+		</AlertDialog.Content>
+	</AlertDialog.Portal>
+</AlertDialog.Root>
+
+<!-- Delete Chat Confirmation Dialog -->
+<AlertDialog.Root bind:open={showDeleteDialog}>
+	<AlertDialog.Portal>
+		<AlertDialog.Overlay />
+		<AlertDialog.Content class="max-w-md">
+			<AlertDialog.Header>
+				<AlertDialog.Title>Delete Chat</AlertDialog.Title>
+				<AlertDialog.Description class="text-muted-foreground text-sm">
+					Are you sure you want to delete this chat? This action cannot be undone.
+				</AlertDialog.Description>
+			</AlertDialog.Header>
+
+			<AlertDialog.Footer>
+				<AlertDialog.Cancel onclick={() => (showDeleteDialog = false)}>
+					Cancel
+				</AlertDialog.Cancel>
+				<AlertDialog.Action onclick={handleDeleteConfirm} class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+					Delete
 				</AlertDialog.Action>
 			</AlertDialog.Footer>
 		</AlertDialog.Content>
