@@ -20,6 +20,7 @@
 	import { isLoading } from '$lib/stores/chat.svelte';
 	import { useProcessingState } from '$lib/hooks/use-processing-state.svelte';
 	import { fade } from 'svelte/transition';
+    import ChatMessageToolCall from "$lib/components/app/chat/ChatMessages/ChatMessageToolCall.svelte";
 
 	interface Props {
 		class?: string;
@@ -29,6 +30,7 @@
 		onRegenerate?: (message: DatabaseMessage) => void;
 		onUpdateMessage?: (message: DatabaseMessage, newContent: string) => void;
 		onDelete?: (message: DatabaseMessage) => void;
+        getToolMessage?: (toolCallId: string) => DatabaseMessage | undefined;
 	}
 
 	let {
@@ -38,7 +40,8 @@
 		onCopy,
 		onRegenerate,
 		onUpdateMessage,
-		onDelete
+		onDelete,
+        getToolMessage = (() => undefined)
 	}: Props = $props();
 
 	let isEditing = $state(false);
@@ -198,20 +201,20 @@
 		aria-label="Assistant message with actions"
 	>
 		{#if thinkingContent}
-			<ChatMessageThinkingBlock 
-				reasoningContent={thinkingContent} 
-				isStreaming={!message.timestamp} 
+			<ChatMessageThinkingBlock
+				reasoningContent={thinkingContent}
+				isStreaming={!message.timestamp}
 				hasRegularContent={!!messageContent?.trim()}
 			/>
 		{/if}
 
-		{#if message?.role === 'assistant' && !message.content && isLoading()}
+        {#if message?.role === 'assistant' && !message.content && isLoading()}
 			<div class="w-full max-w-[48rem] mt-6" in:fade>
 				<div class="processing-container">
 					<span class="processing-text">
 						{processingState.getProcessingMessage()}
 					</span>
-					
+
 					{#if processingState.shouldShowDetails()}
 						<div class="processing-details">
 							{#each processingState.getProcessingDetails() as detail}
@@ -224,6 +227,10 @@
 		{/if}
 
 		{#if message.role === 'assistant'}
+                <ChatMessageToolCall
+                    assistantMessage={message}
+                    getToolMessage={getToolMessage}
+                />
 			<MarkdownContent content={messageContent} />
 		{:else}
 			<div class="whitespace-pre-wrap text-sm">
