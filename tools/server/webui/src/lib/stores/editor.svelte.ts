@@ -6,7 +6,6 @@ export class EditorStore {
 		  justify-content: center;
 		  align-items: center;
 		  font-family: "Segoe UI", sans-serif;
-		  color: #fff;
 		  width: 100vw;
 		  height: 100vh;
 		  overflow: hidden;

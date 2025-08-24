@@ -20,9 +20,11 @@
 	import { navigating } from '$app/state';
 	import ChatScreenDragOverlay from './ChatScreenDragOverlay.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
-    import CodeEditor from "$lib/components/app/chat/ChatHTMLEditor/CodeEditor.svelte";
 	import { deleteConversation } from '$lib/stores/chat.svelte';
 	import { goto } from '$app/navigation';
+	import { Button } from '$lib/components/ui/button';
+	import { Code, Eye, Columns, X } from '@lucide/svelte';
+    import CodeEditor from "$lib/components/app/chat/ChatHTMLEditor/CodeEditor.svelte";
 
 
 	let { showCenteredEmpty = false } = $props();
@@ -32,6 +34,8 @@
 	let uploadedFiles = $state<ChatUploadedFile[]>([]);
 	let isDragOver = $state(false);
 	let dragCounter = $state(0);
+	let showCodeEditor = $state(false);
+	let editorViewMode = $state<'split' | 'code' | 'result'>('split');
 
 	// Alert Dialog state for file upload errors
 	let showFileErrorDialog = $state(false);
@@ -199,6 +203,14 @@
 		}
 	}
 
+	function toggleCodeEditor() {
+		showCodeEditor = !showCodeEditor;
+	}
+
+	function setEditorViewMode(mode: 'split' | 'code' | 'result') {
+		editorViewMode = mode;
+	}
+
 	async function handleDeleteConfirm() {
 		const conversation = activeConversation();
 		if (conversation) {
@@ -236,10 +248,10 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <ChatScreenHeader />
-<div class="flex flex-row h-full overflow-y-auto">
+<div class={showCodeEditor ? "grid grid-cols-2 h-full overflow-y-auto gap-4 p-4 pt-16" : "flex flex-col h-full overflow-y-auto"}>
 {#if !isEmpty}
 	<div
-		class="flex h-full flex-col flex-grow flex-1 overflow-y-auto px-4 md:px-6"
+		class={showCodeEditor ? "flex h-full flex-col overflow-y-auto px-4 md:px-6" : "flex h-full flex-col overflow-y-auto px-4 md:px-6"}
 		bind:this={chatScrollContainer}
 		onscroll={handleScroll}
 		ondragenter={handleDragEnter}
@@ -260,6 +272,8 @@
 					onStop={() => stopGeneration()}
 					showHelperText={false}
 					bind:uploadedFiles
+					showCodeEditor={showCodeEditor}
+					onToggleCodeEditor={toggleCodeEditor}
 				/>
 			</div>
 		</div>
@@ -300,12 +314,57 @@
 					onStop={() => stopGeneration()}
 					showHelperText={true}
 					bind:uploadedFiles
+					showCodeEditor={showCodeEditor}
+					onToggleCodeEditor={toggleCodeEditor}
 				/>
 			</div>
 		</div>
 	</div>
 {/if}
-<CodeEditor></CodeEditor>
+{#if showCodeEditor}
+	<div class="editor-container border border-border rounded-lg flex flex-col h-full">
+		<div class="editor-header flex items-center justify-between p-2 bg-muted rounded-t-lg">
+			<div class="flex items-center space-x-2">
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => setEditorViewMode('code')}
+					class={editorViewMode === 'code' ? 'underline text-foreground' : 'text-muted-foreground'}
+				>
+					<Code class="w-4 h-4 mr-1" />
+					Code
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => setEditorViewMode('split')}
+					class={editorViewMode === 'split' ? 'underline text-foreground' : 'text-muted-foreground'}
+				>
+					<Columns class="w-4 h-4 mr-1" />
+					Split
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => setEditorViewMode('result')}
+					class={editorViewMode === 'result' ? 'underline text-foreground' : 'text-muted-foreground'}
+				>
+					<Eye class="w-4 h-4 mr-1" />
+					Preview
+				</Button>
+			</div>
+			<Button
+				variant="ghost"
+				size="sm"
+				onclick={toggleCodeEditor}
+				class="p-2 h-8 w-8 text-muted-foreground"
+			>
+				<X class="w-4 h-4" />
+			</Button>
+		</div>
+		<CodeEditor viewMode={editorViewMode} />
+	</div>
+{/if}
 </div>
 
 <!-- File Upload Error Alert Dialog -->

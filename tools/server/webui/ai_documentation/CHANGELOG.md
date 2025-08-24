@@ -14,8 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added keyboard shortcuts for common actions:
   - Ctrl/Cmd + K: Create new chat
   - Ctrl/Cmd + Shift + D: Delete current chat
-- Added tool calling support with client-side tool execution
-- Added editor tools for HTML code manipulation:
+- Added tool calling support with client-side tool execution:
   - Get current editor code
   - Set editor code
   - Find and replace in editor code
@@ -32,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced streaming response handling to process tool calls
 - Updated UI components to display tool calls and results
 - Improved file upload error handling with better user feedback
+- Improved code editor toggle button styling and tooltip to match attachment button
+- Fixed code editor sizing to maintain 50:50 split with chat area
+- Fixed code editor view mode buttons visibility by adding proper text colors
+- Fixed code editor positioning to prevent overlap with top bar
+- Fixed syntax error in ChatScreen component template
 
 ### Deprecated
 - None
