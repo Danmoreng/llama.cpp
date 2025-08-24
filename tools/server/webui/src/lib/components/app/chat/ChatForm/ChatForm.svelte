@@ -31,6 +31,8 @@
 		onStop?: () => void;
 		showHelperText?: boolean;
 		uploadedFiles?: ChatUploadedFile[];
+		showCodeEditor?: boolean;
+		onToggleCodeEditor?: () => void;
 	}
 
 	let {
@@ -43,6 +45,8 @@
 		onStop,
 		showHelperText = true,
 		uploadedFiles = $bindable([]),
+		showCodeEditor = false,
+		onToggleCodeEditor
 	}: Props = $props();
 
 	const currentConfig = $derived(config());
@@ -246,6 +250,8 @@
 			{disabled}
 			{isLoading}
 			{isRecording}
+			{showCodeEditor}
+			{onToggleCodeEditor}
 			onFileUpload={handleFileUpload}
 			onMicClick={handleMicClick}
 			onStop={handleStop}
