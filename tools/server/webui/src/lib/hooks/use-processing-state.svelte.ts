@@ -1,24 +1,45 @@
-import { slotsService } from '$lib/services/slots';
+import { SETTING_CONFIG_DEFAULT } from '$lib/constants/settings-config';
+import { slotsService } from '$lib/services';
+import { config } from '$lib/stores/settings.svelte';
 import type { ApiProcessingState } from '$lib/types/api';
 
+/**
+ * useProcessingState - Reactive processing state hook
+ *
+ * This hook provides reactive access to the processing state of the server.
+ * It monitors the slots endpoint for changes and updates the processing state
+ * accordingly. The hook also provides functions to start and stop monitoring,
+ * as well as a function to get the current processing message and details.
+ *
+ * @returns {Object} An object containing the processing state, isPolling, getProcessingMessage,
+ * getProcessingDetails, shouldShowDetails, startMonitoring, and stopMonitoring.
+ */
 export function useProcessingState() {
-	let processingState = $state<ApiProcessingState | null>(null);
 	let isPolling = $state(false);
+	let processingState = $state<ApiProcessingState | null>(null);
 	let unsubscribe: (() => void) | null = null;
 
 	async function startMonitoring(): Promise<void> {
 		if (isPolling) return;
 
 		isPolling = true;
-		
+
 		unsubscribe = slotsService.subscribe((state) => {
 			processingState = state;
 		});
 
 		try {
-			await slotsService.startPolling();
+			const currentState = await slotsService.getCurrentState();
+
+			if (currentState) {
+				processingState = currentState;
+			}
+
+			if (slotsService.isStreaming()) {
+				slotsService.startStreamingPolling();
+			}
 		} catch (error) {
-			console.warn('Failed to start slots polling:', error);
+			console.warn('Failed to start slots monitoring:', error);
 			// Continue without slots monitoring - graceful degradation
 		}
 	}
@@ -33,8 +54,6 @@ export function useProcessingState() {
 			unsubscribe();
 			unsubscribe = null;
 		}
-
-		slotsService.stopPolling();
 	}
 
 	function getProcessingMessage(): string {
@@ -63,17 +82,30 @@ export function useProcessingState() {
 		}
 
 		const details: string[] = [];
+		const currentConfig = config(); // Get fresh config each time
 
 		if (processingState.contextUsed > 0) {
-			const contextPercent = Math.round((processingState.contextUsed / processingState.contextTotal) * 100);
-			details.push(`Context: ${processingState.contextUsed}/${processingState.contextTotal} (${contextPercent}%)`);
+			const contextPercent = Math.round(
+				(processingState.contextUsed / processingState.contextTotal) * 100
+			);
+			details.push(
+				`Context: ${processingState.contextUsed}/${processingState.contextTotal} (${contextPercent}%)`
+			);
 		}
 
-		if (processingState.temperature !== 0.8) {
+		if (
+			currentConfig.showTokensPerSecond &&
+			processingState.tokensPerSecond &&
+			processingState.tokensPerSecond > 0
+		) {
+			details.push(`${processingState.tokensPerSecond.toFixed(1)} tokens/sec`);
+		}
+
+		if (processingState.temperature !== SETTING_CONFIG_DEFAULT.temperature) {
 			details.push(`Temperature: ${processingState.temperature.toFixed(1)}`);
 		}
-		
-		if (processingState.topP !== 0.95) {
+
+		if (processingState.topP !== SETTING_CONFIG_DEFAULT.top_p) {
 			details.push(`Top-p: ${processingState.topP.toFixed(2)}`);
 		}
 
@@ -89,12 +121,16 @@ export function useProcessingState() {
 	}
 
 	return {
-		get processingState() { return processingState; },
-		get isPolling() { return isPolling; },
-		startMonitoring,
-		stopMonitoring,
-		getProcessingMessage,
+		get processingState() {
+			return processingState;
+		},
+		get isPolling() {
+			return isPolling;
+		},
 		getProcessingDetails,
-		shouldShowDetails
+		getProcessingMessage,
+		shouldShowDetails,
+		startMonitoring,
+		stopMonitoring
 	};
 }

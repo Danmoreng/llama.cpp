@@ -1,28 +1,27 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button';
 	import { Paperclip, Image, FileText, File, Volume2 } from '@lucide/svelte';
-	import { supportsAudio, supportsVision } from '$lib/stores/server.svelte';
-	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { Button } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { FileTypeCategory } from '$lib/constants/supported-file-types';
 	import { TOOLTIP_DELAY_DURATION } from '$lib/constants/tooltip-config';
+	import { supportsAudio, supportsVision } from '$lib/stores/server.svelte';
 
 	interface Props {
-		disabled?: boolean;
-		onFileUpload?: (fileType?: 'image' | 'audio' | 'file' | 'pdf') => void;
 		class?: string;
+		disabled?: boolean;
+		onFileUpload?: (fileType?: FileTypeCategory) => void;
 	}
 
-	let {
-		disabled = false,
-		onFileUpload,
-		class: className = ''
-	}: Props = $props();
+	let { class: className = '', disabled = false, onFileUpload }: Props = $props();
 
-	const fileUploadTooltipText = !supportsVision() 
-		? 'Text files and PDFs supported. Images, audio, and video require vision models.'
-		: 'Attach files';
+	const fileUploadTooltipText = $derived.by(() => {
+		return !supportsVision()
+			? 'Text files and PDFs supported. Images, audio, and video require vision models.'
+			: 'Attach files';
+	});
 
-	function handleFileUpload(fileType?: 'image' | 'audio' | 'file' | 'pdf') {
+	function handleFileUpload(fileType?: FileTypeCategory) {
 		onFileUpload?.(fileType);
 	}
 </script>
@@ -33,9 +32,9 @@
 			<Tooltip.Root delayDuration={TOOLTIP_DELAY_DURATION}>
 				<Tooltip.Trigger>
 					<Button
-						type="button"
-						class="file-upload-button text-muted-foreground bg-transparent hover:bg-foreground/10 hover:text-foreground h-8 w-8 rounded-full p-0"
+						class="file-upload-button h-8 w-8 rounded-full bg-transparent p-0 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
 						{disabled}
+						type="button"
 					>
 						<span class="sr-only">Attach files</span>
 
@@ -51,11 +50,11 @@
 
 		<DropdownMenu.Content align="start" class="w-48">
 			<Tooltip.Root delayDuration={TOOLTIP_DELAY_DURATION}>
-				<Tooltip.Trigger class="w-full" >
-					<DropdownMenu.Item 
-						class="images-button flex items-center gap-2 cursor-pointer" 
+				<Tooltip.Trigger class="w-full">
+					<DropdownMenu.Item
+						class="images-button flex cursor-pointer items-center gap-2"
 						disabled={!supportsVision()}
-						onclick={() => handleFileUpload('image')}
+						onclick={() => handleFileUpload(FileTypeCategory.IMAGE)}
 					>
 						<Image class="h-4 w-4" />
 
@@ -71,39 +70,39 @@
 			</Tooltip.Root>
 
 			<Tooltip.Root delayDuration={TOOLTIP_DELAY_DURATION}>
-				<Tooltip.Trigger class="w-full" >
+				<Tooltip.Trigger class="w-full">
+					<DropdownMenu.Item
+						class="audio-button flex cursor-pointer items-center gap-2"
+						disabled={!supportsAudio()}
+						onclick={() => handleFileUpload(FileTypeCategory.AUDIO)}
+					>
+						<Volume2 class="h-4 w-4" />
 
-				<DropdownMenu.Item 
-					class="audio-button flex items-center gap-2 cursor-pointer"
-					disabled={!supportsAudio()}
-					onclick={() => handleFileUpload('audio')}
-				>
-					<Volume2 class="h-4 w-4" />
+						<span>Audio Files</span>
+					</DropdownMenu.Item>
+				</Tooltip.Trigger>
 
-					<span>Audio Files</span>
-				</DropdownMenu.Item>
-			</Tooltip.Trigger>
-
-			{#if !supportsAudio()}
-				<Tooltip.Content>
-					<p>Audio files require audio models to be processed</p>
-				</Tooltip.Content>
-			{/if}
+				{#if !supportsAudio()}
+					<Tooltip.Content>
+						<p>Audio files require audio models to be processed</p>
+					</Tooltip.Content>
+				{/if}
 			</Tooltip.Root>
-			
-			<DropdownMenu.Item 
-				class="flex items-center gap-2 cursor-pointer" 
-				onclick={() => handleFileUpload('file')}
+
+			<DropdownMenu.Item
+				class="flex cursor-pointer items-center gap-2"
+				onclick={() => handleFileUpload(FileTypeCategory.TEXT)}
 			>
 				<FileText class="h-4 w-4" />
+
 				<span>Text Files</span>
 			</DropdownMenu.Item>
 
 			<Tooltip.Root delayDuration={TOOLTIP_DELAY_DURATION}>
 				<Tooltip.Trigger class="w-full">
-					<DropdownMenu.Item 
-						class="flex items-center gap-2 cursor-pointer" 
-						onclick={() => handleFileUpload('pdf')}
+					<DropdownMenu.Item
+						class="flex cursor-pointer items-center gap-2"
+						onclick={() => handleFileUpload(FileTypeCategory.PDF)}
 					>
 						<File class="h-4 w-4" />
 

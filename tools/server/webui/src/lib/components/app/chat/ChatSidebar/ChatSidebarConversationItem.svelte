@@ -5,27 +5,27 @@
 	import { Trash2, Pencil, MoreHorizontal } from '@lucide/svelte';
 
 	interface Props {
-		conversation: DatabaseConversation;
 		isActive?: boolean;
-		onSelect?: (id: string) => void;
-		onEdit?: (id: string, name: string) => void;
+		conversation: DatabaseConversation;
 		onDelete?: (id: string) => void;
+		onEdit?: (id: string, name: string) => void;
+		onSelect?: (id: string) => void;
 		showLastModified?: boolean;
 	}
 
 	let {
 		conversation,
-		isActive = false,
-		onSelect,
-		onEdit,
 		onDelete,
+		onEdit,
+		onSelect,
+		isActive = false,
 		showLastModified = false
 	}: Props = $props();
 
-	let showDeleteDialog = $state(false);
-	let showEditDialog = $state(false);
-	let showDropdown = $state(false);
 	let editedName = $state('');
+	let showDeleteDialog = $state(false);
+	let showDropdown = $state(false);
+	let showEditDialog = $state(false);
 
 	function formatLastModified(timestamp: number) {
 		const now = Date.now();
@@ -40,8 +40,13 @@
 		return `${days}d ago`;
 	}
 
-	function handleSelect() {
-		onSelect?.(conversation.id);
+	function handleConfirmDelete() {
+		onDelete?.(conversation.id);
+	}
+
+	function handleConfirmEdit() {
+		if (!editedName.trim()) return;
+		onEdit?.(conversation.id, editedName);
 	}
 
 	function handleEdit(event: Event) {
@@ -50,18 +55,13 @@
 		showEditDialog = true;
 	}
 
-	function handleConfirmEdit() {
-		if (!editedName.trim()) return;
-		onEdit?.(conversation.id, editedName);
-	}
-
-	function handleConfirmDelete() {
-		onDelete?.(conversation.id);
+	function handleSelect() {
+		onSelect?.(conversation.id);
 	}
 </script>
 
 <button
-	class="hover:bg-foreground/10 group flex w-full cursor-pointer items-center justify-between space-x-3 rounded-lg px-3 py-1.5 text-left transition-colors {isActive
+	class="group flex w-full cursor-pointer items-center justify-between space-x-3 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-foreground/10 {isActive
 		? 'bg-foreground/5 text-accent-foreground'
 		: ''}"
 	onclick={handleSelect}
@@ -71,8 +71,8 @@
 			<p class="truncate text-sm font-medium">{conversation.name}</p>
 
 			{#if showLastModified}
-				<div class="mt-2 flex flex-wrap items-center space-x-2 space-y-2">
-					<span class="text-muted-foreground w-full text-xs">
+				<div class="mt-2 flex flex-wrap items-center space-y-2 space-x-2">
+					<span class="w-full text-xs text-muted-foreground">
 						{formatLastModified(conversation.lastModified)}
 					</span>
 				</div>
@@ -85,7 +85,7 @@
 			<DropdownMenu.Trigger
 				class="{showDropdown
 					? 'show-dropdown'
-					: ''} hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground flex h-6 w-6 cursor-pointer items-center justify-center rounded-md p-0 text-sm font-medium transition-colors focus:outline-none disabled:pointer-events-none disabled:opacity-50"
+					: ''} flex h-6 w-6 cursor-pointer items-center justify-center rounded-md p-0 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
 			>
 				<MoreHorizontal class="h-3 w-3" />
 
@@ -95,6 +95,7 @@
 			<DropdownMenu.Content align="end" class="z-999 w-48">
 				<DropdownMenu.Item onclick={handleEdit} class="flex items-center gap-2">
 					<Pencil class="h-4 w-4" />
+
 					Edit
 				</DropdownMenu.Item>
 
@@ -109,24 +110,36 @@
 					}}
 				>
 					<Trash2 class="h-4 w-4" />
+
 					Delete
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 
 		<AlertDialog.Root bind:open={showDeleteDialog}>
-			<AlertDialog.Content>
+			<AlertDialog.Content
+				onkeydown={(e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						handleConfirmDelete();
+						showDeleteDialog = false;
+					}
+				}}
+			>
 				<AlertDialog.Header>
 					<AlertDialog.Title>Delete Conversation</AlertDialog.Title>
+
 					<AlertDialog.Description>
-						Are you sure you want to delete "{conversation.name}"? This action cannot be
-						undone and will permanently remove all messages in this conversation.
+						Are you sure you want to delete "{conversation.name}"? This action cannot be undone and
+						will permanently remove all messages in this conversation.
 					</AlertDialog.Description>
 				</AlertDialog.Header>
+
 				<AlertDialog.Footer>
 					<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+
 					<AlertDialog.Action
-						class="bg-destructive text-destructive-foreground"
+						class="bg-destructive text-white hover:bg-destructive/80 "
 						onclick={handleConfirmDelete}>Delete</AlertDialog.Action
 					>
 				</AlertDialog.Footer>
@@ -137,6 +150,7 @@
 			<AlertDialog.Content>
 				<AlertDialog.Header>
 					<AlertDialog.Title>Edit Conversation Name</AlertDialog.Title>
+
 					<AlertDialog.Description>
 						<Input
 							class="mt-4 text-foreground"
@@ -153,8 +167,10 @@
 						/>
 					</AlertDialog.Description>
 				</AlertDialog.Header>
+
 				<AlertDialog.Footer>
 					<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+
 					<AlertDialog.Action onclick={handleConfirmEdit}>Save</AlertDialog.Action>
 				</AlertDialog.Footer>
 			</AlertDialog.Content>

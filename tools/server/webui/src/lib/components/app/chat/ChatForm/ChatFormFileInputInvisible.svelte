@@ -1,31 +1,24 @@
 <script lang="ts">
-	import { ALL_SUPPORTED_EXTENSIONS, ALL_SUPPORTED_MIME_TYPES } from '$lib/constants/supported-file-types';
 	import { generateModalityAwareAcceptString } from '$lib/utils/modality-file-validation';
 
 	interface Props {
 		accept?: string;
+		class?: string;
 		multiple?: boolean;
 		onFileSelect?: (files: File[]) => void;
-		class?: string;
 	}
-
-	// Generate accept string from our enum-based supported file types
-	const defaultAccept = [
-		...ALL_SUPPORTED_EXTENSIONS,
-		...ALL_SUPPORTED_MIME_TYPES,
-	].join(',');
 
 	let {
 		accept = $bindable(),
+		class: className = '',
 		multiple = true,
-		onFileSelect,
-		class: className = ''
+		onFileSelect
 	}: Props = $props();
 
 	let fileInputElement: HTMLInputElement | undefined;
 
 	// Use modality-aware accept string by default, but allow override
-	const finalAccept = $derived(accept ?? generateModalityAwareAcceptString());
+	let finalAccept = $derived(accept ?? generateModalityAwareAcceptString());
 
 	export function click() {
 		fileInputElement?.click();

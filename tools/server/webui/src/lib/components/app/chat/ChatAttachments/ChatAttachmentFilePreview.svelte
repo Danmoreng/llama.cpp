@@ -1,8 +1,8 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { FileTypeCategory, TextMimeType } from '$lib/constants/supported-file-types';
-	import { X } from '@lucide/svelte';
-	import { stopPropagation } from 'svelte/legacy';
+	import { formatFileSize, getFileTypeLabel, getPreviewText } from '$lib/utils/file-preview';
 
 	interface Props {
 		class?: string;
@@ -25,54 +25,38 @@
 		readonly = false,
 		size,
 		textContent,
-		type,
+		type
 	}: Props = $props();
-
-	function formatFileSize(bytes: number): string {
-		if (bytes === 0) return '0 Bytes';
-		const k = 1024;
-		const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-	}
-
-	function getFileTypeLabel(fileType: string): string {
-		return fileType.split('/').pop()?.toUpperCase() || 'FILE';
-	}
-
-	function getPreviewText(content: string): string {
-		return content.length > 150 ? content.substring(0, 150) : content;
-	}
 </script>
 
 {#if type === TextMimeType.PLAIN || type === FileTypeCategory.TEXT}
 	{#if readonly}
 		<!-- Readonly mode (ChatMessage) -->
 		<button
-			class="bg-muted border-border cursor-pointer rounded-lg border p-3 transition-shadow hover:shadow-md {className} w-full max-w-2xl"
+			class="cursor-pointer rounded-lg border border-border bg-muted p-3 transition-shadow hover:shadow-md {className} w-full max-w-2xl"
 			onclick={onClick}
 			aria-label={`Preview ${name}`}
 			type="button"
 		>
 			<div class="flex items-start gap-3">
 				<div class="flex min-w-0 flex-1 flex-col items-start text-left">
-					<span class="text-foreground w-full truncate text-sm font-medium">{name}</span>
+					<span class="w-full truncate text-sm font-medium text-foreground">{name}</span>
 
 					{#if size}
-						<span class="text-muted-foreground text-xs">{formatFileSize(size)}</span>
+						<span class="text-xs text-muted-foreground">{formatFileSize(size)}</span>
 					{/if}
 
 					{#if textContent && type === 'text'}
 						<div class="relative mt-2 w-full">
 							<div
-								class="text-muted-foreground overflow-hidden whitespace-pre-wrap break-words font-mono text-xs leading-relaxed"
+								class="overflow-hidden font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground"
 							>
 								{getPreviewText(textContent)}
 							</div>
 
 							{#if textContent.length > 150}
 								<div
-									class="from-muted pointer-events-none absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t to-transparent"
+									class="pointer-events-none absolute right-0 bottom-0 left-0 h-6 bg-gradient-to-t from-muted to-transparent"
 								></div>
 							{/if}
 						</div>
@@ -82,12 +66,12 @@
 		</button>
 	{:else}
 		<!-- Non-readonly mode (ChatForm) -->
-		<div class="bg-muted border-border relative rounded-lg border p-3 {className} w-64">
+		<div class="relative rounded-lg border border-border bg-muted p-3 {className} w-64">
 			<Button
 				type="button"
 				variant="ghost"
 				size="sm"
-				class="absolute right-2 top-2 h-6 w-6 bg-white/20 p-0 hover:bg-white/30"
+				class="absolute top-2 right-2 h-6 w-6 bg-white/20 p-0 hover:bg-white/30"
 				onclick={() => onRemove?.(id)}
 				aria-label="Remove file"
 			>
@@ -95,12 +79,12 @@
 			</Button>
 
 			<div class="pr-8">
-				<span class="text-foreground mb-3 block truncate text-sm font-medium">{name}</span>
+				<span class="mb-3 block truncate text-sm font-medium text-foreground">{name}</span>
 
 				{#if textContent}
 					<div class="relative">
 						<div
-							class="text-muted-foreground overflow-hidden whitespace-pre-wrap break-words font-mono text-xs leading-relaxed"
+							class="overflow-hidden font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground"
 							style="max-height: 3.6em; line-height: 1.2em;"
 						>
 							{getPreviewText(textContent)}
@@ -108,7 +92,7 @@
 
 						{#if textContent.length > 150}
 							<div
-								class="from-muted pointer-events-none absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t to-transparent"
+								class="pointer-events-none absolute right-0 bottom-0 left-0 h-4 bg-gradient-to-t from-muted to-transparent"
 							></div>
 						{/if}
 					</div>
@@ -117,20 +101,23 @@
 		</div>
 	{/if}
 {:else}
-	<button class="bg-muted border-border flex gap-3 items-center gap-2 rounded-lg border p-3 {className}" 
-			onclick={onClick}>
+	<button
+		class="flex items-center gap-2 gap-3 rounded-lg border border-border bg-muted p-3 {className}"
+		onclick={onClick}
+	>
 		<div
-			class="bg-primary/10 text-primary flex h-8 w-8 items-center justify-center rounded text-xs font-medium"
+			class="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-xs font-medium text-primary"
 		>
 			{getFileTypeLabel(type)}
 		</div>
 
 		<div class="flex flex-col gap-1">
-			<span class="text-foreground max-w-36 truncate text-sm font-medium md:max-w-72"
-				>{name}</span
-			>
+			<span class="max-w-36 truncate text-sm font-medium text-foreground md:max-w-72">
+				{name}
+			</span>
+
 			{#if size}
-				<span class="text-left text-muted-foreground text-xs">{formatFileSize(size)}</span>
+				<span class="text-left text-xs text-muted-foreground">{formatFileSize(size)}</span>
 			{/if}
 		</div>
 
@@ -148,5 +135,5 @@
 				<X class="h-3 w-3" />
 			</Button>
 		{/if}
-		</button>
+	</button>
 {/if}

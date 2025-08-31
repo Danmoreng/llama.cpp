@@ -3,7 +3,12 @@
 	import { FileText, Image, Music, FileIcon, Eye } from '@lucide/svelte';
 	import { convertPDFToImage } from '$lib/utils/pdf-processing';
 	import { Button } from '$lib/components/ui/button';
-	import { FileTypeCategory, PdfMimeType, getFileTypeCategory } from '$lib/constants/supported-file-types';
+	import {
+		FileTypeCategory,
+		ApplicationMimeType,
+		getFileTypeCategory
+	} from '$lib/constants/supported-file-types';
+	import { formatFileSize } from '$lib/utils/file-preview';
 
 	interface Props {
 		open: boolean;
@@ -38,90 +43,84 @@
 				: attachment?.type === 'textFile'
 					? 'text'
 					: attachment?.type === 'audioFile'
-						? (attachment as any).mimeType || 'audio'
+						? attachment.mimeType || 'audio'
 						: attachment?.type === 'pdfFile'
-							? 'application/pdf'
+							? ApplicationMimeType.PDF
 							: type || 'unknown')
 	);
 
 	let displaySize = $derived(uploadedFile?.size || size);
 
 	let displayPreview = $derived(
-		uploadedFile?.preview ||
-			(attachment?.type === 'imageFile' ? (attachment as any).base64Url : preview)
+		uploadedFile?.preview || (attachment?.type === 'imageFile' ? attachment.base64Url : preview)
 	);
 
 	let displayTextContent = $derived(
 		uploadedFile?.textContent ||
 			(attachment?.type === 'textFile'
-				? (attachment as any).content
+				? attachment.content
 				: attachment?.type === 'pdfFile'
-					? (attachment as any).content
+					? attachment.content
 					: textContent)
 	);
 
-	let isImage = $derived(getFileTypeCategory(displayType) === FileTypeCategory.IMAGE || displayType === 'image');
-	let isText = $derived(getFileTypeCategory(displayType) === FileTypeCategory.TEXT || displayType === 'text');
-	let isPdf = $derived(displayType === PdfMimeType.PDF);
-	let isAudio = $derived(getFileTypeCategory(displayType) === FileTypeCategory.AUDIO || displayType === 'audio');
+	let isAudio = $derived(
+		getFileTypeCategory(displayType) === FileTypeCategory.AUDIO || displayType === 'audio'
+	);
+	let isImage = $derived(
+		getFileTypeCategory(displayType) === FileTypeCategory.IMAGE || displayType === 'image'
+	);
+	let isPdf = $derived(displayType === ApplicationMimeType.PDF);
+	let isText = $derived(
+		getFileTypeCategory(displayType) === FileTypeCategory.TEXT || displayType === 'text'
+	);
+
+	let IconComponent = $derived(() => {
+		if (isImage) return Image;
+		if (isText || isPdf) return FileText;
+		if (isAudio) return Music;
+
+		return FileIcon;
+	});
 
 	let pdfViewMode = $state<'text' | 'pages'>('pages');
 	let pdfImages = $state<string[]>([]);
 	let pdfImagesLoading = $state(false);
 	let pdfImagesError = $state<string | null>(null);
 
-	let IconComponent = $derived(() => {
-		if (isImage) return Image;
-		if (isText || isPdf) return FileText;
-		if (isAudio) return Music;
-		return FileIcon;
-	});
-
-	function formatFileSize(bytes: number): string {
-		if (bytes === 0) return '0 Bytes';
-
-		const k = 1024;
-		const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-	}
-
 	async function loadPdfImages() {
 		if (!isPdf || pdfImages.length > 0 || pdfImagesLoading) return;
-		
+
 		pdfImagesLoading = true;
 		pdfImagesError = null;
-		
+
 		try {
 			let file: File | null = null;
-			
+
 			if (uploadedFile?.file) {
 				file = uploadedFile.file;
 			} else if (attachment?.type === 'pdfFile') {
-				
 				// Check if we have pre-processed images
-				if ((attachment as any).images && Array.isArray((attachment as any).images)) {
-					pdfImages = (attachment as any).images;
+				if (attachment.images && Array.isArray(attachment.images)) {
+					pdfImages = attachment.images;
 					return;
 				}
-				
+
 				// Convert base64 back to File for processing
-				if ((attachment as any).base64Data) {
-					const base64Data = (attachment as any).base64Data;
+				if (attachment.base64Data) {
+					const base64Data = attachment.base64Data;
 					const byteCharacters = atob(base64Data);
 					const byteNumbers = new Array(byteCharacters.length);
 					for (let i = 0; i < byteCharacters.length; i++) {
 						byteNumbers[i] = byteCharacters.charCodeAt(i);
 					}
 					const byteArray = new Uint8Array(byteNumbers);
-					file = new File([byteArray], displayName, { type: PdfMimeType.PDF });
+					file = new File([byteArray], displayName, { type: ApplicationMimeType.PDF });
 				}
 			}
-			
+
 			if (file) {
-				const images = await convertPDFToImage(file);
-				pdfImages = images;
+				pdfImages = await convertPDFToImage(file);
 			} else {
 				throw new Error('No PDF file available for conversion');
 			}
@@ -140,21 +139,23 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="grid max-h-[90vh] !p-10 max-w-5xl overflow-hidden sm:w-auto sm:max-w-6xl">
+	<Dialog.Content class="grid max-h-[90vh] max-w-5xl overflow-hidden !p-10 sm:w-auto sm:max-w-6xl">
 		<Dialog.Header class="flex-shrink-0">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3">
 					{#if IconComponent}
-						<IconComponent class="text-muted-foreground h-5 w-5" />
+						<IconComponent class="h-5 w-5 text-muted-foreground" />
 					{/if}
 
 					<div>
 						<Dialog.Title class="text-left">{displayName}</Dialog.Title>
 
-						<div class="text-muted-foreground flex items-center gap-2 text-sm">
+						<div class="flex items-center gap-2 text-sm text-muted-foreground">
 							<span>{displayType}</span>
+
 							{#if displaySize}
 								<span>•</span>
+
 								<span>{formatFileSize(displaySize)}</span>
 							{/if}
 						</div>
@@ -166,23 +167,31 @@
 						<Button
 							variant={pdfViewMode === 'text' ? 'default' : 'outline'}
 							size="sm"
-							onclick={() => pdfViewMode = 'text'}
+							onclick={() => (pdfViewMode = 'text')}
 							disabled={pdfImagesLoading}
 						>
-							<FileText class="h-4 w-4 mr-1" />
+							<FileText class="mr-1 h-4 w-4" />
+
 							Text
 						</Button>
+
 						<Button
 							variant={pdfViewMode === 'pages' ? 'default' : 'outline'}
 							size="sm"
-							onclick={() => { pdfViewMode = 'pages'; loadPdfImages(); }}
+							onclick={() => {
+								pdfViewMode = 'pages';
+								loadPdfImages();
+							}}
 							disabled={pdfImagesLoading}
 						>
 							{#if pdfImagesLoading}
-								<div class="h-4 w-4 mr-1 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+								<div
+									class="mr-1 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+								></div>
 							{:else}
-								<Eye class="h-4 w-4 mr-1" />
+								<Eye class="mr-1 h-4 w-4" />
 							{/if}
+
 							Pages
 						</Button>
 					</div>
@@ -203,24 +212,36 @@
 				{#if pdfImagesLoading}
 					<div class="flex items-center justify-center p-8">
 						<div class="text-center">
-							<div class="h-8 w-8 mx-auto mb-4 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+							<div
+								class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"
+							></div>
+
 							<p class="text-muted-foreground">Converting PDF to images...</p>
 						</div>
 					</div>
 				{:else if pdfImagesError}
 					<div class="flex items-center justify-center p-8">
 						<div class="text-center">
-							<FileText class="text-muted-foreground mx-auto mb-4 h-16 w-16" />
-							<p class="text-muted-foreground mb-4">Failed to load PDF images</p>
-							<p class="text-muted-foreground text-sm">{pdfImagesError}</p>
-							<Button class="mt-4" onclick={() => { pdfViewMode = 'text'; }}>View as Text</Button>
+							<FileText class="mx-auto mb-4 h-16 w-16 text-muted-foreground" />
+
+							<p class="mb-4 text-muted-foreground">Failed to load PDF images</p>
+
+							<p class="text-sm text-muted-foreground">{pdfImagesError}</p>
+
+							<Button
+								class="mt-4"
+								onclick={() => {
+									pdfViewMode = 'text';
+								}}>View as Text</Button
+							>
 						</div>
 					</div>
 				{:else if pdfImages.length > 0}
-					<div class="max-h-[70vh] overflow-auto space-y-4">
-						{#each pdfImages as image, index}
+					<div class="max-h-[70vh] space-y-4 overflow-auto">
+						{#each pdfImages as image, index (image)}
 							<div class="text-center">
-								<p class="text-muted-foreground mb-2 text-sm">Page {index + 1}</p>
+								<p class="mb-2 text-sm text-muted-foreground">Page {index + 1}</p>
+
 								<img
 									src={image}
 									alt="PDF Page {index + 1}"
@@ -232,43 +253,40 @@
 				{:else}
 					<div class="flex items-center justify-center p-8">
 						<div class="text-center">
-							<FileText class="text-muted-foreground mx-auto mb-4 h-16 w-16" />
-							<p class="text-muted-foreground mb-4">No PDF pages available</p>
+							<FileText class="mx-auto mb-4 h-16 w-16 text-muted-foreground" />
+
+							<p class="mb-4 text-muted-foreground">No PDF pages available</p>
 						</div>
 					</div>
 				{/if}
 			{:else if (isText || (isPdf && pdfViewMode === 'text')) && displayTextContent}
 				<div
-					class="bg-muted max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg p-4 font-mono text-sm"
+					class="max-h-[60vh] overflow-auto rounded-lg bg-muted p-4 font-mono text-sm break-words whitespace-pre-wrap"
 				>
 					{displayTextContent}
 				</div>
 			{:else if isAudio}
 				<div class="flex items-center justify-center p-8">
 					<div class="w-full max-w-md text-center">
-						<Music class="text-muted-foreground mx-auto mb-4 h-16 w-16" />
-						
+						<Music class="mx-auto mb-4 h-16 w-16 text-muted-foreground" />
+
 						{#if attachment?.type === 'audioFile'}
-							<audio 
-								controls 
-								class="w-full mb-4"
-								src="data:{(attachment as any).mimeType};base64,{(attachment as any).base64Data}"
+							<audio
+								controls
+								class="mb-4 w-full"
+								src="data:{attachment.mimeType};base64,{attachment.base64Data}"
 							>
 								Your browser does not support the audio element.
 							</audio>
 						{:else if uploadedFile?.preview}
-							<audio 
-								controls 
-								class="w-full mb-4"
-								src={uploadedFile.preview}
-							>
+							<audio controls class="mb-4 w-full" src={uploadedFile.preview}>
 								Your browser does not support the audio element.
 							</audio>
 						{:else}
-							<p class="text-muted-foreground mb-4">Audio preview not available</p>
+							<p class="mb-4 text-muted-foreground">Audio preview not available</p>
 						{/if}
-						
-						<p class="text-muted-foreground text-sm">
+
+						<p class="text-sm text-muted-foreground">
 							{displayName}
 						</p>
 					</div>
@@ -277,12 +295,10 @@
 				<div class="flex items-center justify-center p-8">
 					<div class="text-center">
 						{#if IconComponent}
-							<IconComponent class="text-muted-foreground mx-auto mb-4 h-16 w-16" />
+							<IconComponent class="mx-auto mb-4 h-16 w-16 text-muted-foreground" />
 						{/if}
 
-						<p class="text-muted-foreground mb-4">
-							Preview not available for this file type
-						</p>
+						<p class="mb-4 text-muted-foreground">Preview not available for this file type</p>
 					</div>
 				</div>
 			{/if}
