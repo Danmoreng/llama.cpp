@@ -5,9 +5,8 @@
 	import { parseThinkingContent } from '$lib/utils/thinking';
 	import ChatMessageAssistant from './ChatMessageAssistant.svelte';
 	import ChatMessageUser from './ChatMessageUser.svelte';
-    import ChatMessageToolCall from "$lib/components/app/chat/ChatMessages/ChatMessageToolCall.svelte";
 
-	interface Props {
+    interface Props {
 		class?: string;
 		message: DatabaseMessage;
 		onCopy?: (message: DatabaseMessage) => void;
@@ -28,7 +27,6 @@
 		onNavigateToSibling,
 		onRegenerateWithBranching,
 		siblingInfo = null,
-		onDelete,
         getToolMessage = (() => undefined)
 	}: Props = $props();
 
@@ -158,6 +156,7 @@
 		{deletionInfo}
 		{message}
 		{messageContent}
+        {getToolMessage}
 		onDelete={handleDelete}
 		onConfirmDelete={handleConfirmDelete}
 		onCopy={handleCopy}
