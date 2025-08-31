@@ -127,16 +127,13 @@
             class="mx-auto w-full max-w-[48rem]"
             {message}
             {siblingInfo}
-        /* tool pairing / lookup */
-        getToolMessage={(id) => toolMsgsById.get(id)}
-        /* legacy branching handlers */
-        onDelete={handleDeleteMessage}
-        onNavigateToSibling={handleNavigateToSibling}
-        onEditWithBranching={handleEditWithBranching}
-        onRegenerateWithBranching={handleRegenerateWithBranching}
-        /* new non-branching handlers */
-        onUpdateMessage={handleUpdateMessage}
-        onRegenerate={handleRegenerate}
+            getToolMessage={(id) => toolMsgsById.get(id)}
+            onDelete={handleDeleteMessage}
+            onNavigateToSibling={handleNavigateToSibling}
+            onEditWithBranching={handleEditWithBranching}
+            onRegenerateWithBranching={handleRegenerateWithBranching}
+            onUpdateMessage={handleUpdateMessage}
+            onRegenerate={handleRegenerate}
         />
     {/each}
 </div>

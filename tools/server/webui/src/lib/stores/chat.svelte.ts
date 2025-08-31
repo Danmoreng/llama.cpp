@@ -6,12 +6,12 @@ import type {
 	DatabaseMessage,
 	DatabaseMessageExtra
 } from '$lib/types/database';
+import type { ChatRole, ChatMessageType } from '$lib/types/chat';
 import { config } from '$lib/stores/settings.svelte';
 import { filterByLeafNodeId, findLeafNode, findDescendantMessages } from '$lib/utils/branching';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import { extractPartialThinking } from '$lib/utils/thinking';
-import { config } from '$lib/stores/settings.svelte';
 import type { ApiToolCall } from '$lib/types/api';
 import { editorTools, executeEditorTool } from '$lib/tools/editorTools';
 
@@ -61,9 +61,7 @@ class ChatStore {
 		message: string;
 		estimatedTokens: number;
 		maxContext: number;
-	} | null>(
-		null
-	);
+	} | null>(null);
 
 	constructor() {
 		if (browser) {
@@ -263,365 +261,375 @@ class ChatStore {
 	 * @param onError - Optional callback when an error occurs
 	 */
 	private async streamChatCompletion(
-  allMessages: DatabaseMessage[],
-  assistantMessage: DatabaseMessage,
-  onComplete?: (content: string) => Promise<void>,
-  onError?: (error: Error) => void
-): Promise<void> {
-  // ---- streaming state
-  let streamedContent = '';
-  let streamedReasoningContent = '';
-  let didFinalComplete = false;
+		allMessages: DatabaseMessage[],
+		assistantMessage: DatabaseMessage,
+		onComplete?: (content: string) => Promise<void>,
+		onError?: (error: Error) => void
+	): Promise<void> {
+		// ---- streaming state
+		let streamedContent = '';
+		let streamedReasoningContent = '';
+		let didFinalComplete = false;
 
-  // ---- tool loop state
-  const MAX_TOOL_ROUNDS = 10;
-  let round = 0;
-  const seenCalls = new Set<string>();
-  // Tail of API-shaped messages produced during THIS assistant turn
-  let historyTail: any[] = [];
+		// ---- tool loop state
+		const MAX_TOOL_ROUNDS = 10;
+		let round = 0;
+		const seenCalls = new Set<string>();
+		// Tail of API-shaped messages produced during THIS assistant turn
+		let historyTail: any[] = [];
 
-  const convId = this.activeConversation?.id ?? '';
+		const convId = this.activeConversation?.id ?? '';
 
-  // Start slots polling at the beginning of streaming
-  slotsService.startStreamingPolling();
+		// Start slots polling at the beginning of streaming
+		slotsService.startStreamingPolling();
 
-  try {
-    while (true) {
-      round++;
-      if (round > MAX_TOOL_ROUNDS) {
-        console.warn(`Reached MAX_TOOL_ROUNDS(${MAX_TOOL_ROUNDS}). Stopping tool loop.`);
-        break;
-      }
+		try {
+			while (true) {
+				round++;
+				if (round > MAX_TOOL_ROUNDS) {
+					console.warn(`Reached MAX_TOOL_ROUNDS(${MAX_TOOL_ROUNDS}). Stopping tool loop.`);
+					break;
+				}
 
-      streamedContent = '';
+				streamedContent = '';
 
-      // Track the TEXT assistant message of this round
-      let roundAssistantMsg: DatabaseMessage | null = null;
-      let createdRoundAssistantMsg = false;
-      let roundHadText = false;
+				// Track the TEXT assistant message of this round
+				let roundAssistantMsg: DatabaseMessage | null = null;
+				let createdRoundAssistantMsg = false;
+				let roundHadText = false;
 
-      // Round 1 uses the pre-created assistantMessage; later rounds create a new assistant TEXT message
-      if (round === 1) {
-        roundAssistantMsg = assistantMessage;
-      } else {
-        const parentId = this.activeMessages.length
-          ? this.activeMessages[this.activeMessages.length - 1].id
-          : (assistantMessage.parent ?? '-1');
+				// Round 1 uses the pre-created assistantMessage; later rounds create a new assistant TEXT message
+				if (round === 1) {
+					roundAssistantMsg = assistantMessage;
+				} else {
+					const parentId = this.activeMessages.length
+						? this.activeMessages[this.activeMessages.length - 1].id
+						: (assistantMessage.parent ?? '-1');
 
-        roundAssistantMsg = await DatabaseStore.addMessage({
-          convId,
-          role: 'assistant',
-          content: '',
-          type: 'text',
-          timestamp: Date.now(),
-          parent: parentId,
-          thinking: '',
-          children: [],
-          extra: undefined
-        });
+					roundAssistantMsg = await DatabaseStore.createMessageBranch(
+						{
+							convId,
+							role: 'assistant',
+							content: '',
+							type: 'text',
+							timestamp: Date.now(),
+							parent: parentId,
+							thinking: '',
+							children: [],
+							extra: undefined
+						},
+						parentId
+					);
 
-        this.activeMessages.push(roundAssistantMsg);
-        this.updateConversationTimestamp?.();
-        createdRoundAssistantMsg = true;
-      }
+					if (roundAssistantMsg) {
+						this.activeMessages.push(roundAssistantMsg);
+					}
+					this.updateConversationTimestamp?.();
+					createdRoundAssistantMsg = true;
+				}
 
-      // Will be filled if the model emits tool calls
-      let assistantToolCallApiMsg: any | null = null;
-      let assistantToolCallDbMsg: DatabaseMessage | null = null;
-      const collectedToolCalls: ApiToolCall[] = [];
+				// Will be filled if the model emits tool calls
+				let assistantToolCallApiMsg: any | null = null;
+				let assistantToolCallDbMsg: DatabaseMessage | null = null;
+				const collectedToolCalls: ApiToolCall[] = [];
 
-      const outgoing = [...allMessages, ...historyTail];
+				const outgoing = [...allMessages, ...historyTail];
 
-      await this.chatService.sendChatCompletion(outgoing, {
-        ...this.getApiOptions(),          // keeps timings_per_token, penalties, samplers, etc.
-        tools: editorTools,
-        tool_choice: 'auto',
-        stream: true,
+				await chatService.sendMessage(outgoing, {
+					...this.getApiOptions(), // keeps timings_per_token, penalties, samplers, etc.
+					tools: editorTools,
+					tool_choice: 'auto',
+					stream: true,
 
-        onChunk: (chunk: string) => {
-          streamedContent += chunk;
-          this.currentResponse = streamedContent;
+					onChunk: (chunk: string) => {
+						streamedContent += chunk;
+						this.currentResponse = streamedContent;
 
-          const partialThinking = extractPartialThinking(streamedContent);
-          const clean = partialThinking.remainingContent || streamedContent;
+						const partialThinking = extractPartialThinking(streamedContent);
+						const clean = partialThinking.remainingContent || streamedContent;
 
-          if (clean && clean.trim().length > 0) {
-            roundHadText = true;
-          }
+						if (clean && clean.trim().length > 0) {
+							roundHadText = true;
+						}
 
-          // Update the current round's assistant TEXT message in-memory
-          if (roundAssistantMsg) {
-            const idx = this.findMessageIndex(roundAssistantMsg.id);
-            if (idx !== -1) {
-              this.updateMessageAtIndex(idx, { content: clean });
-            }
-          }
+						// Update the current round's assistant TEXT message in-memory
+						if (roundAssistantMsg) {
+							const idx = this.findMessageIndex(roundAssistantMsg.id);
+							if (idx !== -1) {
+								this.updateMessageAtIndex(idx, { content: clean });
+							}
+						}
 
-          // keep your UI in sync (slots)
-          slotsService.updateSlotsState();
-        },
+						// keep your UI in sync (slots)
+						slotsService.updateSlotsState();
+					},
 
-        onReasoningChunk: (reasoningChunk: string) => {
-          streamedReasoningContent += reasoningChunk;
+					onReasoningChunk: (reasoningChunk: string) => {
+						streamedReasoningContent += reasoningChunk;
 
-          // Update "thinking" for the current round's assistant TEXT message
-          if (roundAssistantMsg) {
-            const idx = this.findMessageIndex(roundAssistantMsg.id);
-            if (idx !== -1) {
-              this.updateMessageAtIndex(idx, { thinking: streamedReasoningContent });
-            }
-          }
+						// Update "thinking" for the current round's assistant TEXT message
+						if (roundAssistantMsg) {
+							const idx = this.findMessageIndex(roundAssistantMsg.id);
+							if (idx !== -1) {
+								this.updateMessageAtIndex(idx, { thinking: streamedReasoningContent });
+							}
+						}
 
-          slotsService.updateSlotsState();
-        },
+						slotsService.updateSlotsState();
+					},
 
-        onToolCalls: async (calls: ApiToolCall[]) => {
-          // Ensure each call has an id
-          for (const c of calls) {
-            if (!c.id) {
-              c.id = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
-            }
-          }
+					onToolCalls: async (calls: ApiToolCall[]) => {
+						// Ensure each call has an id
+						for (const c of calls) {
+							if (!c.id) {
+								c.id = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+							}
+						}
 
-          collectedToolCalls.push(...calls);
+						collectedToolCalls.push(...calls);
 
-          // API-shaped assistant message that *requests* tools
-          assistantToolCallApiMsg = {
-            role: 'assistant',
-            content: '',
-            tool_calls: calls.map((c) => ({
-              id: c.id!,
-              type: 'function',
-              function: { name: c.function.name, arguments: c.function.arguments }
-            }))
-          };
+						// API-shaped assistant message that *requests* tools
+						assistantToolCallApiMsg = {
+							role: 'assistant',
+							content: '',
+							tool_calls: calls.map((c) => ({
+								id: c.id!,
+								type: 'function',
+								function: { name: c.function.name, arguments: c.function.arguments }
+							}))
+						};
 
-          // Persist a DB assistant message that holds the tool calls
-          try {
-            assistantToolCallDbMsg = await DatabaseStore.addMessage({
-              convId,
-              role: 'assistant',
-              content: '',
-              type: 'text',
-              timestamp: Date.now(),
-              parent: roundAssistantMsg?.id ?? assistantMessage.parent ?? '-1',
-              thinking: '',
-              children: [],
-              toolCalls: calls.map((c) => ({
-                id: c.id!,
-                type: 'function',
-                name: c.function.name,
-                arguments: c.function.arguments
-              }))
-            });
+						// Persist a DB assistant message that holds the tool calls
+						try {
+							assistantToolCallDbMsg = await DatabaseStore.createMessageBranch(
+								{
+									convId,
+									role: 'assistant',
+									content: '',
+									type: 'text',
+									timestamp: Date.now(),
+									parent: roundAssistantMsg?.id ?? assistantMessage.parent ?? '-1',
+									thinking: '',
+									children: [],
+									toolCalls: calls.map((c) => ({
+										id: c.id!,
+										type: 'function',
+										name: c.function.name,
+										arguments: c.function.arguments
+									}))
+								},
+								roundAssistantMsg?.id ?? assistantMessage.parent ?? null
+							);
 
-            this.activeMessages.push(assistantToolCallDbMsg);
-            this.updateConversationTimestamp?.();
+							this.activeMessages.push(assistantToolCallDbMsg);
+							this.updateConversationTimestamp?.();
 
-            // This becomes part of the API-visible history for the next step
-            historyTail = [...historyTail, assistantToolCallApiMsg];
-          } catch (err) {
-            console.warn('Failed to persist assistant tool_call message:', err);
-          }
-        },
+							// This becomes part of the API-visible history for the next step
+							historyTail = [...historyTail, assistantToolCallApiMsg];
+						} catch (err) {
+							console.warn('Failed to persist assistant tool_call message:', err);
+						}
+					},
 
-        onComplete: async (_finalContent?: string, _reasoningContent?: string) => {
-          // Save final clean text for THIS ROUND (if any)
-          const finalClean = ((): string => {
-            const pt = extractPartialThinking(streamedContent);
-            return pt.remainingContent || streamedContent || '';
-          })();
+					onComplete: async (_finalContent?: string, _reasoningContent?: string) => {
+						// Save final clean text for THIS ROUND (if any)
+						const finalClean = ((): string => {
+							const pt = extractPartialThinking(streamedContent);
+							return pt.remainingContent || streamedContent || '';
+						})();
 
-          if (roundHadText && roundAssistantMsg) {
-            await DatabaseStore.updateMessage(roundAssistantMsg.id, {
-              content: finalClean,
-              thinking: streamedReasoningContent
-            });
-          }
+						if (roundHadText && roundAssistantMsg) {
+							await DatabaseStore.updateMessage(roundAssistantMsg.id, {
+								content: finalClean,
+								thinking: streamedReasoningContent
+							});
+						}
 
-          // If there was assistant TEXT this round, insert it into historyTail *before* the assistant tool_calls
-          if (roundHadText && finalClean.trim()) {
-            if (assistantToolCallApiMsg) {
-              const idx = historyTail.lastIndexOf(assistantToolCallApiMsg);
-              if (idx >= 0) {
-                historyTail.splice(idx, 0, { role: 'assistant', content: finalClean });
-              } else {
-                historyTail.push({ role: 'assistant', content: finalClean });
-              }
-            } else {
-              historyTail.push({ role: 'assistant', content: finalClean });
-            }
-          }
-        },
+						// If there was assistant TEXT this round, insert it into historyTail *before* the assistant tool_calls
+						if (roundHadText && finalClean.trim()) {
+							if (assistantToolCallApiMsg) {
+								const idx = historyTail.lastIndexOf(assistantToolCallApiMsg);
+								if (idx >= 0) {
+									historyTail.splice(idx, 0, { role: 'assistant', content: finalClean });
+								} else {
+									historyTail.push({ role: 'assistant', content: finalClean });
+								}
+							} else {
+								historyTail.push({ role: 'assistant', content: finalClean });
+							}
+						}
+					},
 
-        onError: async (error: Error) => {
-          // Stop slots polling on any error
-          slotsService.stopStreamingPolling();
+					onError: async (error: Error) => {
+						// Stop slots polling on any error
+						slotsService.stopStreamingPolling();
 
-          // Abort by user: silent cleanup
-          if (error.name === 'AbortError' || error instanceof DOMException) {
-            this.isLoading = false;
-            this.currentResponse = '';
-            return;
-          }
+						// Abort by user: silent cleanup
+						if (error.name === 'AbortError' || error instanceof DOMException) {
+							this.isLoading = false;
+							this.currentResponse = '';
+							return;
+						}
 
-          // Context errors: clean up placeholder, set context dialog state
-          if (error.name === 'ContextError') {
-            console.warn('Context error:', error.message);
-            this.isLoading = false;
-            this.currentResponse = '';
+						// Context errors: clean up placeholder, set context dialog state
+						if (error.name === 'ContextError') {
+							console.warn('Context error:', error.message);
+							this.isLoading = false;
+							this.currentResponse = '';
 
-            // Remove the placeholder created this round if it has no text
-            if (createdRoundAssistantMsg && roundAssistantMsg && !roundHadText) {
-              const rmIdx = this.activeMessages.findIndex((m) => m.id === roundAssistantMsg!.id);
-              if (rmIdx !== -1) this.activeMessages.splice(rmIdx, 1);
-              DatabaseStore.deleteMessage(roundAssistantMsg.id).catch(console.error);
-            }
+							// Remove the placeholder created this round if it has no text
+							if (createdRoundAssistantMsg && roundAssistantMsg && !roundHadText) {
+								const rmIdx = this.activeMessages.findIndex((m) => m.id === roundAssistantMsg!.id);
+								if (rmIdx !== -1) this.activeMessages.splice(rmIdx, 1);
+								DatabaseStore.deleteMessage(roundAssistantMsg.id).catch(console.error);
+							}
 
-            this.maxContextError = {
-              message: error.message,
-              estimatedTokens: 0,
-              maxContext: serverStore.serverProps?.default_generation_settings.n_ctx ?? 4096
-            };
+							this.maxContextError = {
+								message: error.message,
+								estimatedTokens: 0,
+								maxContext: serverStore.serverProps?.default_generation_settings.n_ctx ?? 4096
+							};
 
-            if (onError) onError(error);
-            throw error; // break outer while
-          }
+							if (onError) onError(error);
+							throw error; // break outer while
+						}
 
-          // Generic error: mark the current round message with the error
-          console.error('Streaming error:', error);
-          this.isLoading = false;
-          this.currentResponse = '';
+						// Generic error: mark the current round message with the error
+						console.error('Streaming error:', error);
+						this.isLoading = false;
+						this.currentResponse = '';
 
-          if (roundAssistantMsg) {
-            const idx = this.findMessageIndex(roundAssistantMsg.id);
-            if (idx !== -1) {
-              this.updateMessageAtIndex(idx, { content: `Error: ${error.message}` });
-            }
-          }
+						if (roundAssistantMsg) {
+							const idx = this.findMessageIndex(roundAssistantMsg.id);
+							if (idx !== -1) {
+								this.updateMessageAtIndex(idx, { content: `Error: ${error.message}` });
+							}
+						}
 
-          if (onError) onError(error);
-          throw error; // break outer while
-        }
-      });
+						if (onError) onError(error);
+						throw error; // break outer while
+					}
+				});
 
-      // ===== after stream returns for this round: either final text only, or text + tool calls
+				// ===== after stream returns for this round: either final text only, or text + tool calls
 
-      // No tool calls → we’re done
-      if (collectedToolCalls.length === 0) {
-        // If we created a placeholder but never got text, clean it up
-        if (createdRoundAssistantMsg && roundAssistantMsg && !roundHadText) {
-          const rmIdx = this.activeMessages.findIndex((m) => m.id === roundAssistantMsg!.id);
-          if (rmIdx !== -1) this.activeMessages.splice(rmIdx, 1);
-          await DatabaseStore.deleteMessage(roundAssistantMsg.id).catch(console.error);
-        }
+				// No tool calls → we’re done
+				if (collectedToolCalls.length === 0) {
+					// If we created a placeholder but never got text, clean it up
+					if (createdRoundAssistantMsg && roundAssistantMsg && !roundHadText) {
+						const rmIdx = this.activeMessages.findIndex((m) => m.id === roundAssistantMsg!.id);
+						if (rmIdx !== -1) this.activeMessages.splice(rmIdx, 1);
+						await DatabaseStore.deleteMessage(roundAssistantMsg.id).catch(console.error);
+					}
 
-        if (!didFinalComplete && onComplete) {
-          didFinalComplete = true;
-          // Provide the final clean text of this last round to onComplete
-          const pt = extractPartialThinking(streamedContent);
-          await onComplete(pt.remainingContent || streamedContent || '');
-        }
-        break; // exit tool loop
-      }
+					if (!didFinalComplete && onComplete) {
+						didFinalComplete = true;
+						// Provide the final clean text of this last round to onComplete
+						const pt = extractPartialThinking(streamedContent);
+						await onComplete(pt.remainingContent || streamedContent || '');
+					}
+					break; // exit tool loop
+				}
 
-      // We HAVE tool calls → execute them, append tool results to history, loop again
+				// We HAVE tool calls → execute them, append tool results to history, loop again
 
-      // Final clean text of this round (if any)
-      const finalRoundText = ((): string => {
-        const pt = extractPartialThinking(streamedContent);
-        return pt.remainingContent || streamedContent || '';
-      })();
-      const roundHasNonEmptyText = roundHadText && finalRoundText.trim().length > 0;
+				// Final clean text of this round (if any)
+				const finalRoundText = ((): string => {
+					const pt = extractPartialThinking(streamedContent);
+					return pt.remainingContent || streamedContent || '';
+				})();
+				const roundHasNonEmptyText = roundHadText && finalRoundText.trim().length > 0;
 
-      // If we created a placeholder but ended with no text, remove it
-      if (createdRoundAssistantMsg && roundAssistantMsg && !roundHasNonEmptyText) {
-        const rmIdx = this.activeMessages.findIndex((m) => m.id === roundAssistantMsg!.id);
-        if (rmIdx !== -1) this.activeMessages.splice(rmIdx, 1);
-        await DatabaseStore.deleteMessage(roundAssistantMsg.id).catch(console.error);
-      }
+				// If we created a placeholder but ended with no text, remove it
+				if (createdRoundAssistantMsg && roundAssistantMsg && !roundHasNonEmptyText) {
+					const rmIdx = this.activeMessages.findIndex((m) => m.id === roundAssistantMsg!.id);
+					if (rmIdx !== -1) this.activeMessages.splice(rmIdx, 1);
+					await DatabaseStore.deleteMessage(roundAssistantMsg.id).catch(console.error);
+				}
 
-      // Execute each tool call and persist tool messages
-      const toolApiMsgs: any[] = [];
-      for (let i = 0; i < collectedToolCalls.length; i++) {
-        const c = collectedToolCalls[i];
-        const fingerprint = `${c.function.name}:${c.function.arguments}`;
-        if (seenCalls.has(fingerprint)) {
-          console.warn('Repeated tool call (same name+args):', fingerprint);
-        }
-        seenCalls.add(fingerprint);
+				// Execute each tool call and persist tool messages
+				const toolApiMsgs: any[] = [];
+				for (let i = 0; i < collectedToolCalls.length; i++) {
+					const c = collectedToolCalls[i];
+					const fingerprint = `${c.function.name}:${c.function.arguments}`;
+					if (seenCalls.has(fingerprint)) {
+						console.warn('Repeated tool call (same name+args):', fingerprint);
+					}
+					seenCalls.add(fingerprint);
 
-        const toolApiMsg = await executeEditorTool(c); // -> { role:'tool', content, tool_call_id, name? }
+					const toolApiMsg = await executeEditorTool(c); // -> { role:'tool', content, tool_call_id, name? }
 
-        // Ensure linking metadata
-        if (!toolApiMsg.tool_call_id) toolApiMsg.tool_call_id = c.id!;
-        if (!toolApiMsg.name) toolApiMsg.name = c.function.name;
+					// Ensure linking metadata
+					if (!toolApiMsg.tool_call_id) toolApiMsg.tool_call_id = c.id!;
+					if (!toolApiMsg.name) toolApiMsg.name = c.function.name;
 
-        toolApiMsgs.push(toolApiMsg);
+					toolApiMsgs.push(toolApiMsg);
 
-        // Persist tool result as DB message and show in UI
-        try {
-          const dbToolMsg = await DatabaseStore.addMessage({
-            convId,
-            role: 'tool',
-            content: toolApiMsg.content,
-            type: 'text',
-            timestamp: (assistantToolCallDbMsg?.timestamp ?? Date.now()) + (i + 1),
-            parent:
-              assistantToolCallDbMsg?.id ??
-              roundAssistantMsg?.id ??
-              assistantMessage.parent ??
-              '-1',
-            thinking: '',
-            children: [],
-            toolCallId: toolApiMsg.tool_call_id,
-            toolName: toolApiMsg.name
-          });
+					// Persist tool result as DB message and show in UI
+					try {
+						const dbToolMsg = await DatabaseStore.createMessageBranch(
+							{
+								convId,
+								role: 'tool',
+								content: toolApiMsg.content,
+								type: 'text',
+								timestamp: (assistantToolCallDbMsg?.timestamp ?? Date.now()) + (i + 1),
+								parent:
+									assistantToolCallDbMsg?.id ??
+									roundAssistantMsg?.id ??
+									assistantMessage.parent ??
+									'-1',
+								thinking: '',
+								children: [],
+								toolCallId: toolApiMsg.tool_call_id,
+								toolName: toolApiMsg.name
+							},
+							assistantToolCallDbMsg?.id ?? roundAssistantMsg?.id ?? assistantMessage.parent ?? null
+						);
 
-          this.activeMessages.push(dbToolMsg);
-          this.updateConversationTimestamp?.();
-        } catch (err) {
-          console.warn('Failed to persist tool message:', err);
-        }
-      }
+						this.activeMessages.push(dbToolMsg);
+						this.updateConversationTimestamp?.();
+					} catch (err) {
+						console.warn('Failed to persist tool message:', err);
+					}
+				}
 
-      // Add tools to the API-visible history tail (assistant text already injected earlier if any)
-      historyTail = [...historyTail, ...toolApiMsgs];
+				// Add tools to the API-visible history tail (assistant text already injected earlier if any)
+				historyTail = [...historyTail, ...toolApiMsgs];
 
-      // Prepare for next while-iteration; next round will create its own assistant TEXT message
-      // Reset per-round reasoning accumulation
-      streamedReasoningContent = '';
-    }
+				// Prepare for next while-iteration; next round will create its own assistant TEXT message
+				// Reset per-round reasoning accumulation
+				streamedReasoningContent = '';
+			}
 
-    // ---- finalization (success path)
-    // Stop polling
-    slotsService.stopStreamingPolling();
+			// ---- finalization (success path)
+			// Stop polling
+			slotsService.stopStreamingPolling();
 
-    // Set currNode to the latest assistant TEXT message in this turn (fallback: original assistantMessage)
-    let lastAssistantId = assistantMessage.id;
-    for (let i = this.activeMessages.length - 1; i >= 0; i--) {
-      const m = this.activeMessages[i];
-      if (m.role === 'assistant' && m.type === 'text') {
-        lastAssistantId = m.id;
-        break;
-      }
-    }
+			// Set currNode to the latest assistant TEXT message in this turn (fallback: original assistantMessage)
+			let lastAssistantId = assistantMessage.id;
+			for (let i = this.activeMessages.length - 1; i >= 0; i--) {
+				const m = this.activeMessages[i];
+				if (m.role === 'assistant' && m.type === 'text') {
+					lastAssistantId = m.id;
+					break;
+				}
+			}
 
-    await DatabaseStore.updateCurrentNode(this.activeConversation!.id, lastAssistantId);
-    this.activeConversation!.currNode = lastAssistantId;
+			await DatabaseStore.updateCurrentNode(this.activeConversation!.id, lastAssistantId);
+			this.activeConversation!.currNode = lastAssistantId;
 
-    // Ensure UI state matches DB state
-    await this.refreshActiveMessages();
+			// Ensure UI state matches DB state
+			await this.refreshActiveMessages();
 
-    this.isLoading = false;
-    this.currentResponse = '';
-  } catch {
-    // Errors already handled above; just ensure flags are sane
-    this.isLoading = false;
-    this.currentResponse = '';
-  }
-}
-
+			this.isLoading = false;
+			this.currentResponse = '';
+		} catch {
+			// Errors already handled above; just ensure flags are sane
+			this.isLoading = false;
+			this.currentResponse = '';
+		}
+	}
 
 	/**
 	 * Checks if an error is an abort error (user cancelled operation)
@@ -1364,7 +1372,5 @@ export const deleteMessage = chatStore.deleteMessage.bind(chatStore);
 export const getDeletionInfo = chatStore.getDeletionInfo.bind(chatStore);
 export const updateConversationName = chatStore.updateConversationName.bind(chatStore);
 
-export function stopGeneration() {
-	chatStore.stopGeneration();
-}
+export const stopGeneration = () => chatStore.stopGeneration();
 export const messages = () => chatStore.activeMessages;

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChatMessageThinkingBlock, MarkdownContent } from '$lib/components/app';
+	import { ChatMessageThinkingBlock, MarkdownContent, ChatMessageToolCall } from '$lib/components/app';
 	import { useProcessingState } from '$lib/hooks/use-processing-state.svelte';
 	import { isLoading } from '$lib/stores/chat.svelte';
 	import type { DatabaseMessage } from '$lib/types/database';
@@ -26,6 +26,7 @@
 		showDeleteDialog: boolean;
 		siblingInfo?: MessageSiblingInfo | null;
 		thinkingContent: string | null;
+		getToolMessage?: (id: string) => DatabaseMessage | undefined;
 	}
 
 	let {
@@ -41,14 +42,15 @@
 		onShowDeleteDialogChange,
 		showDeleteDialog,
 		siblingInfo = null,
-		thinkingContent
+		thinkingContent,
+		getToolMessage
 	}: Props = $props();
 
 	const processingState = useProcessingState();
 </script>
 
 <div
-	class="text-md group w-full leading-7.5 {className}"
+	class="text-md leading-7.5 group w-full {className}"
 	role="group"
 	aria-label="Assistant message with actions"
 >
@@ -60,20 +62,32 @@
 		/>
 	{/if}
 
-	{#if message?.role === 'assistant' && isLoading() && !message?.content?.trim()}
-		<div class="mt-6 w-full max-w-[48rem]" in:fade>
+	{#if message?.role === 'assistant' && !message.content && isLoading()}
+		<div class="w-full max-w-[48rem] mt-6" in:fade>
 			<div class="processing-container">
 				<span class="processing-text">
 					{processingState.getProcessingMessage()}
 				</span>
+
+				{#if processingState.shouldShowDetails()}
+					<div class="processing-details">
+						{#each processingState.getProcessingDetails() as detail}
+							<span class="processing-detail">{detail}</span>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		</div>
 	{/if}
 
 	{#if message.role === 'assistant'}
-		<MarkdownContent content={messageContent || ''} />
+		<ChatMessageToolCall
+			assistantMessage={message}
+			getToolMessage={getToolMessage}
+		/>
+		<MarkdownContent content={messageContent} />
 	{:else}
-		<div class="text-sm whitespace-pre-wrap">
+		<div class="whitespace-pre-wrap text-sm">
 			{messageContent}
 		</div>
 	{/if}
@@ -119,6 +133,16 @@
 		animation: shine 1s linear infinite;
 		font-weight: 500;
 		font-size: 0.875rem;
+	}
+
+	.processing-details {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.processing-detail {
+		font-size: 0.75rem;
+		color: var(--muted-foreground);
 	}
 
 	@keyframes shine {

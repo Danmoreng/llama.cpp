@@ -40,7 +40,6 @@
 	import { deleteConversation } from '$lib/stores/chat.svelte';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import { Code, Eye, Columns, X } from '@lucide/svelte';
     import CodeEditor from "$lib/components/app/chat/ChatHTMLEditor/CodeEditor.svelte";
