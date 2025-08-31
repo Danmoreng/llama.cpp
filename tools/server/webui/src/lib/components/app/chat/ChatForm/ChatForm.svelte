@@ -1,8 +1,23 @@
 <script lang="ts">
-	import { ChatAttachmentsList } from '$lib/components/app';
-	import { ChatFormActions, ChatFormFileInputInvisible, ChatFormHelperText, ChatFormTextarea } from '$lib/components/app';
+	import {
+		ChatAttachmentsList,
+		ChatFormActions,
+		ChatFormFileInputInvisible,
+		ChatFormHelperText,
+		ChatFormTextarea
+	} from '$lib/components/app';
 	import { inputClasses } from '$lib/constants/input-classes';
-	import { onMount } from 'svelte';
+	import {
+		TextMimeType,
+		ImageExtension,
+		ImageMimeType,
+		AudioExtension,
+		AudioMimeType,
+		PdfExtension,
+		ApplicationMimeType,
+		TextExtension,
+		FileTypeCategory
+	} from '$lib/constants/supported-file-types';
 	import { config } from '$lib/stores/settings.svelte';
 	import {
 		AudioRecorder,
@@ -10,16 +25,7 @@
 		createAudioFile,
 		isAudioRecordingSupported
 	} from '$lib/utils/audio-recording';
-	import { 
-		TextMimeType, 
-		ImageExtension, 
-		ImageMimeType, 
-		AudioExtension,
-		AudioMimeType,
-		PdfExtension, 
-		PdfMimeType, 
-		TextExtension 
-	} from '$lib/constants/supported-file-types';
+	import { onMount } from 'svelte';
 
 	interface Props {
 		class?: string;
@@ -49,17 +55,48 @@
 		onToggleCodeEditor
 	}: Props = $props();
 
-	const currentConfig = $derived(config());
-	const pasteLongTextToFileLength = $derived(Number(currentConfig.pasteLongTextToFileLen) || 2500);
-
 	let audioRecorder: AudioRecorder | undefined;
-	let isRecording = $state(false);
+	let currentConfig = $derived(config());
+	let fileAcceptString = $state<string | undefined>(undefined);
 	let fileInputRef: ChatFormFileInputInvisible | undefined = $state(undefined);
+	let isRecording = $state(false);
 	let message = $state('');
+	let pasteLongTextToFileLength = $derived(Number(currentConfig.pasteLongTextToFileLen) || 2500);
 	let previousIsLoading = $state(isLoading);
 	let recordingSupported = $state(false);
 	let textareaRef: ChatFormTextarea | undefined = $state(undefined);
-	let fileAcceptString = $state<string | undefined>(undefined);
+
+	function getAcceptStringForFileType(fileType: FileTypeCategory): string {
+		switch (fileType) {
+			case FileTypeCategory.IMAGE:
+				return [...Object.values(ImageExtension), ...Object.values(ImageMimeType)].join(',');
+			case FileTypeCategory.AUDIO:
+				return [...Object.values(AudioExtension), ...Object.values(AudioMimeType)].join(',');
+			case FileTypeCategory.PDF:
+				return [...Object.values(PdfExtension), ...Object.values(ApplicationMimeType)].join(',');
+			case FileTypeCategory.TEXT:
+				return [...Object.values(TextExtension), TextMimeType.PLAIN].join(',');
+			default:
+				return '';
+		}
+	}
+
+	function handleFileSelect(files: File[]) {
+		onFileUpload?.(files);
+	}
+
+	function handleFileUpload(fileType?: FileTypeCategory) {
+		if (fileType) {
+			fileAcceptString = getAcceptStringForFileType(fileType);
+		} else {
+			fileAcceptString = undefined;
+		}
+
+		// Use setTimeout to ensure the accept attribute is applied before opening dialog
+		setTimeout(() => {
+			fileInputRef?.click();
+		}, 10);
+	}
 
 	async function handleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) {
@@ -81,50 +118,6 @@
 				message = messageToSend;
 				uploadedFiles = filesToSend;
 			}
-		}
-	}
-
-	function handleFileSelect(files: File[]) {
-		onFileUpload?.(files);
-	}
-
-	function handleFileUpload(fileType?: 'image' | 'audio' | 'pdf' | 'file') {
-		if (fileType) {
-			fileAcceptString = getAcceptStringForFileType(fileType);
-		} else {
-			fileAcceptString = undefined;
-		}
-		
-		// Use setTimeout to ensure the accept attribute is applied before opening dialog
-		setTimeout(() => {
-			fileInputRef?.click();
-		}, 10);
-	}
-
-	function getAcceptStringForFileType(fileType: 'image' | 'audio' | 'file' | 'pdf'): string {
-		switch (fileType) {
-			case 'image':
-				return [
-					...Object.values(ImageExtension),
-					...Object.values(ImageMimeType)
-				].join(',');
-			case 'audio':
-				return [
-					...Object.values(AudioExtension),
-					...Object.values(AudioMimeType)
-				].join(',');
-			case 'pdf':
-				return [
-					...Object.values(PdfExtension),
-					...Object.values(PdfMimeType)
-				].join(',');
-			case 'file':
-				return [
-					...Object.values(TextExtension),
-					TextMimeType.PLAIN
-				].join(',');
-			default:
-				return '';
 		}
 	}
 
@@ -159,30 +152,6 @@
 		}
 	}
 
-	async function handleSubmit(event: SubmitEvent) {
-		event.preventDefault();
-		if ((!message.trim() && uploadedFiles.length === 0) || disabled || isLoading) return;
-
-		const messageToSend = message.trim();
-		const filesToSend = [...uploadedFiles];
-
-		message = '';
-		uploadedFiles = [];
-
-		textareaRef?.resetHeight();
-
-		const success = await onSend?.(messageToSend, filesToSend);
-
-		if (!success) {
-			message = messageToSend;
-			uploadedFiles = filesToSend;
-		}
-	}
-
-	function handleStop() {
-		onStop?.();
-	}
-
 	async function handleMicClick() {
 		if (!audioRecorder || !recordingSupported) {
 			console.warn('Audio recording not supported');
@@ -211,6 +180,30 @@
 		}
 	}
 
+	function handleStop() {
+		onStop?.();
+	}
+
+	async function handleSubmit(event: SubmitEvent) {
+		event.preventDefault();
+		if ((!message.trim() && uploadedFiles.length === 0) || disabled || isLoading) return;
+
+		const messageToSend = message.trim();
+		const filesToSend = [...uploadedFiles];
+
+		message = '';
+		uploadedFiles = [];
+
+		textareaRef?.resetHeight();
+
+		const success = await onSend?.(messageToSend, filesToSend);
+
+		if (!success) {
+			message = messageToSend;
+			uploadedFiles = filesToSend;
+		}
+	}
+
 	onMount(() => {
 		textareaRef?.focus();
 		recordingSupported = isAudioRecordingSupported();
@@ -226,7 +219,11 @@
 	});
 </script>
 
-<ChatFormFileInputInvisible bind:this={fileInputRef} bind:accept={fileAcceptString} onFileSelect={handleFileSelect} />
+<ChatFormFileInputInvisible
+	bind:this={fileInputRef}
+	bind:accept={fileAcceptString}
+	onFileSelect={handleFileSelect}
+/>
 
 <form
 	onsubmit={handleSubmit}
@@ -242,7 +239,7 @@
 			bind:this={textareaRef}
 			bind:value={message}
 			onKeydown={handleKeydown}
-			disabled={disabled}
+			{disabled}
 		/>
 
 		<ChatFormActions

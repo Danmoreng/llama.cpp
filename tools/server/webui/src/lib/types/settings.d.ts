@@ -1,12 +1,13 @@
-import type { SETTING_CONFIG_DEFAULT } from "$lib/constants/settings-config";
+import type { SETTING_CONFIG_DEFAULT } from '$lib/constants/settings-config';
 
 export type SettingsConfigValue = string | number | boolean;
 
 export interface SettingsFieldConfig {
 	key: string;
 	label: string;
-	type: 'input' | 'textarea' | 'checkbox';
+	type: 'input' | 'textarea' | 'checkbox' | 'select';
 	help?: string;
+	options?: Array<{ value: string; label: string; icon?: typeof import('@lucide/svelte').Icon }>;
 }
 
 export interface SettingsChatServiceOptions {
@@ -35,7 +36,7 @@ export interface SettingsChatServiceOptions {
 	// Sampler configuration
 	samplers?: string | string[];
 	// Custom parameters
-	custom?: any;
+	custom?: string;
 	// Callbacks
 	onChunk?: (chunk: string) => void;
 	onReasoningChunk?: (chunk: string) => void;

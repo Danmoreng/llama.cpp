@@ -1,4 +1,4 @@
-import { ImageMimeType, ImageExtension } from '$lib/constants/supported-file-types';
+import { ImageMimeType } from '$lib/constants/supported-file-types';
 
 /**
  * Convert an SVG base64 data URL to a PNG data URL
@@ -34,14 +34,12 @@ export function svgBase64UrlToPngDataURL(
 					ctx.fillRect(0, 0, canvas.width, canvas.height);
 				}
 				ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-				
+
 				resolve(canvas.toDataURL(ImageMimeType.PNG));
 			};
 
 			img.onerror = () => {
-				reject(
-					new Error('Failed to load SVG image. Ensure the SVG data is valid.')
-				);
+				reject(new Error('Failed to load SVG image. Ensure the SVG data is valid.'));
 			};
 
 			img.src = base64UrlSvg;

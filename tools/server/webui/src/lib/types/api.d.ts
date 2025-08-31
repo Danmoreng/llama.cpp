@@ -54,13 +54,13 @@ export interface ApiLlamaCppServerProps {
 			n_discard: number;
 			ignore_eos: boolean;
 			stream: boolean;
-			logit_bias: any[];
+			logit_bias: Array<[number, number]>;
 			n_probs: number;
 			min_keep: number;
 			grammar: string;
 			grammar_lazy: boolean;
-			grammar_triggers: any[];
-			preserved_tokens: any[];
+			grammar_triggers: string[];
+			preserved_tokens: number[];
 			chat_format: string;
 			reasoning_format: string;
 			reasoning_in_content: boolean;
@@ -71,7 +71,7 @@ export interface ApiLlamaCppServerProps {
 			'speculative.p_min': number;
 			timings_per_token: boolean;
 			post_sampling_probs: boolean;
-			lora: any[];
+			lora: Array<{ name: string; scale: number }>;
 		};
 		prompt: string;
 		next_token: {
@@ -182,7 +182,7 @@ export interface ApiChatCompletionRequest {
 	tools?: ApiFunctionTool[];
 	tool_choice?: ApiToolChoice;
 	// Custom parameters (JSON object/string)
-	custom?: any;
+	custom?: Record<string, unknown>;
 }
 
 export interface ApiChatCompletionStreamChunk {
@@ -259,13 +259,13 @@ export interface ApiSlotData {
 		n_discard: number;
 		ignore_eos: boolean;
 		stream: boolean;
-		logit_bias: any[];
+		logit_bias: Array<[number, number]>;
 		n_probs: number;
 		min_keep: number;
 		grammar: string;
 		grammar_lazy: boolean;
-		grammar_triggers: any[];
-		preserved_tokens: any[];
+		grammar_triggers: string[];
+		preserved_tokens: number[];
 		chat_format: string;
 		reasoning_format: string;
 		reasoning_in_content: boolean;
@@ -276,7 +276,7 @@ export interface ApiSlotData {
 		'speculative.p_min': number;
 		timings_per_token: boolean;
 		post_sampling_probs: boolean;
-		lora: any[];
+		lora: Array<{ name: string; scale: number }>;
 	};
 	prompt: string;
 	next_token: {
@@ -298,4 +298,5 @@ export interface ApiProcessingState {
 	topP: number;
 	speculative: boolean;
 	hasNextToken: boolean;
+	tokensPerSecond?: number;
 }

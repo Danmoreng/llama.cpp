@@ -1,6 +1,4 @@
 import { slotsService } from './slots';
-import { serverStore } from '$lib/stores/server.svelte';
-import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 
 export interface ContextCheckResult {
 	wouldExceed: boolean;
@@ -11,7 +9,36 @@ export interface ContextCheckResult {
 }
 
 /**
- * Enhanced context service that uses real-time slots data for accurate context checking
+ * ContextService - Context window management and limit checking
+ *
+ * This service provides context window monitoring and limit checking using real-time
+ * server data from the slots service. It helps prevent context overflow by tracking
+ * current usage and calculating available space for new content.
+ *
+ * **Architecture & Relationships:**
+ * - **ContextService** (this class): Context limit monitoring
+ *   - Uses SlotsService for real-time context usage data
+ *   - Calculates available tokens with configurable reserves
+ *   - Provides context limit checking and error messaging
+ *   - Helps prevent context window overflow
+ *
+ * - **SlotsService**: Provides current context usage from server slots
+ * - **ChatStore**: Uses context checking before sending messages
+ * - **UI Components**: Display context usage warnings and limits
+ *
+ * **Key Features:**
+ * - **Real-time Context Checking**: Uses live server data for accuracy
+ * - **Token Reservation**: Reserves tokens for response generation
+ * - **Limit Detection**: Prevents context window overflow
+ * - **Usage Reporting**: Detailed context usage statistics
+ * - **Error Messaging**: User-friendly context limit messages
+ * - **Configurable Reserves**: Adjustable token reservation for responses
+ *
+ * **Context Management:**
+ * - Monitors current context usage from active slots
+ * - Calculates available space considering reserved tokens
+ * - Provides early warning before context limits are reached
+ * - Helps optimize conversation length and content
  */
 export class ContextService {
 	private reserveTokens: number;
@@ -21,12 +48,14 @@ export class ContextService {
 	}
 
 	/**
-	 * Check if sending a new message would exceed context limits using real-time slots data
+	 * Checks if the context limit would be exceeded
+	 *
+	 * @returns {Promise<ContextCheckResult | null>} Promise that resolves to the context check result or null if an error occurs
 	 */
 	async checkContextLimit(): Promise<ContextCheckResult | null> {
 		try {
 			const currentState = await slotsService.getCurrentState();
-			
+
 			if (!currentState) {
 				return null;
 			}
@@ -50,7 +79,10 @@ export class ContextService {
 	}
 
 	/**
-	 * Get a formatted error message for context limit exceeded
+	 * Returns a formatted error message for context limit exceeded
+	 *
+	 * @param {ContextCheckResult} result - Context check result
+	 * @returns {string} Formatted error message
 	 */
 	getContextErrorMessage(result: ContextCheckResult): string {
 		const usagePercent = Math.round((result.currentUsage / result.maxContext) * 100);
@@ -58,12 +90,13 @@ export class ContextService {
 	}
 
 	/**
-	 * Set the number of tokens to reserve for response generation
+	 * Sets the number of tokens to reserve for response generation
+	 *
+	 * @param {number} tokens - Number of tokens to reserve
 	 */
 	setReserveTokens(tokens: number): void {
 		this.reserveTokens = tokens;
 	}
 }
 
-// Global instance
 export const contextService = new ContextService();

@@ -12,7 +12,6 @@ trigger: manual
 
 -   **Purpose**: Stateless business logic and external communication
 -   **Contains**:
-    -   Database operations (DatabaseService)
     -   API calls to external services (ApiService)
     -   Pure business logic functions (ChatService, etc.)
 -   **Rules**:
@@ -27,6 +26,7 @@ trigger: manual
 -   **Purpose**: Svelte-specific reactive state with runes
 -   **Contains**:
     -   Reactive state classes with $state, $derived, $effect
+    -   Database operations (DatabaseStore)
     -   UI-focused state management
     -   Store orchestration logic
 -   **Rules**:
@@ -42,3 +42,7 @@ trigger: manual
 -   Stores should leverage Svelte's reactivity system
 -   Clear separation: services handle data, stores handle state
 -   Services can be reused across multiple stores
+
+#### Misc
+
+-   Always use `let` for $derived state variables

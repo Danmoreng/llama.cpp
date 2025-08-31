@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button';
 	import { X } from '@lucide/svelte';
+	import { Button } from '$lib/components/ui/button';
 
 	interface Props {
 		id: string;
 		name: string;
 		preview: string;
-		size?: number;
 		readonly?: boolean;
 		onRemove?: (id: string) => void;
 		onClick?: (event?: MouseEvent) => void;
@@ -21,7 +20,6 @@
 		id,
 		name,
 		preview,
-		size,
 		readonly = false,
 		onRemove,
 		onClick,
@@ -33,11 +31,11 @@
 	}: Props = $props();
 </script>
 
-<div class="bg-muted border-border relative overflow-hidden rounded-lg border {className}">
+<div class="relative overflow-hidden rounded-lg border border-border bg-muted {className}">
 	{#if onClick}
 		<button
 			type="button"
-			class="focus:ring-primary block h-full w-full rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2"
+			class="block h-full w-full rounded-lg focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none"
 			onclick={onClick}
 			aria-label="Preview {name}"
 		>
@@ -57,7 +55,7 @@
 
 	{#if !readonly}
 		<div
-			class="absolute right-1 top-1 flex items-center justify-center opacity-0 transition-opacity hover:opacity-100"
+			class="absolute top-1 right-1 flex items-center justify-center opacity-0 transition-opacity hover:opacity-100"
 		>
 			<Button
 				type="button"

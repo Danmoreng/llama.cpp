@@ -1,10 +1,3 @@
-export interface DatabaseAppSettings {
-	id: string;
-	theme: 'light' | 'dark' | 'system';
-	model: string;
-	temperature: number;
-}
-
 export interface DatabaseConversation {
 	currNode: string | null;
 	id: string;
@@ -39,7 +32,11 @@ export interface DatabaseMessageExtraPdfFile {
 	processedAsImages: boolean; // Whether PDF was processed as images
 }
 
-export type DatabaseMessageExtra = DatabaseMessageExtraImageFile | DatabaseMessageExtraTextFile | DatabaseMessageExtraAudioFile | DatabaseMessageExtraPdfFile;
+export type DatabaseMessageExtra =
+	| DatabaseMessageExtraImageFile
+	| DatabaseMessageExtraTextFile
+	| DatabaseMessageExtraAudioFile
+	| DatabaseMessageExtraPdfFile;
 
 export interface DatabaseToolCall {
 	id: string;                 // set by model if provided; otherwise generate

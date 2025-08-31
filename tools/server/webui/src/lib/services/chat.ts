@@ -20,8 +20,33 @@ type ToolOptions = {
 
 
 /**
- * Service class for handling chat completions with the llama.cpp server.
- * Provides methods for sending messages, handling streaming responses, and managing chat sessions.
+ * ChatService - Low-level API communication layer for llama.cpp server interactions
+ *
+ * This service handles direct communication with the llama.cpp server's chat completion API.
+ * It provides the network layer abstraction for AI model interactions while remaining
+ * stateless and focused purely on API communication.
+ *
+ * **Architecture & Relationship with ChatStore:**
+ * - **ChatService** (this class): Stateless API communication layer
+ *   - Handles HTTP requests/responses with llama.cpp server
+ *   - Manages streaming and non-streaming response parsing
+ *   - Provides request abortion capabilities
+ *   - Converts database messages to API format
+ *   - Handles error translation and context detection
+ *
+ * - **ChatStore**: Stateful orchestration and UI state management
+ *   - Uses ChatService for all AI model communication
+ *   - Manages conversation state, message history, and UI reactivity
+ *   - Coordinates with DatabaseStore for persistence
+ *   - Handles complex workflows like branching and regeneration
+ *
+ * **Key Responsibilities:**
+ * - Message format conversion (DatabaseMessage → API format)
+ * - Streaming response handling with real-time callbacks
+ * - Reasoning content extraction and processing
+ * - File attachment processing (images, PDFs, audio, text)
+ * - Context error detection and reporting
+ * - Request lifecycle management (abort, cleanup)
  */
 export class ChatService {
 	private abortController: AbortController | null = null;
@@ -29,14 +54,15 @@ export class ChatService {
 	/**
 	 * Sends a chat completion request to the llama.cpp server.
 	 * Supports both streaming and non-streaming responses with comprehensive parameter configuration.
+	 * Automatically converts database messages with attachments to the appropriate API format.
 	 *
-	 * @param messages - Array of chat messages to send to the API
+	 * @param messages - Array of chat messages to send to the API (supports both ApiChatMessageData and DatabaseMessage with attachments)
 	 * @param options - Configuration options for the chat completion request. See `SettingsChatServiceOptions` type for details.
 	 * @returns {Promise<string | void>} that resolves to the complete response string (non-streaming) or void (streaming)
 	 * @throws {Error} if the request fails or is aborted
 	 */
 	async sendMessage(
-		messages: ApiChatMessageData[],
+		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
 		options: SettingsChatServiceOptions & ToolOptions = {}
 	): Promise<string | void> {
 		const {
@@ -68,6 +94,7 @@ export class ChatService {
 			// Other parameters
 			samplers,
 			custom,
+			timings_per_token,
 			// tools
 			tools,
 			tool_choice,
@@ -78,12 +105,28 @@ export class ChatService {
 		this.abort();
 		this.abortController = new AbortController();
 
+		// Convert database messages with attachments to API format if needed
+		const normalizedMessages: ApiChatMessageData[] = messages.map((msg) => {
+			// Check if this is a DatabaseMessage by checking for DatabaseMessage-specific fields
+			if ('id' in msg && 'convId' in msg && 'timestamp' in msg) {
+				// This is a DatabaseMessage, convert it
+				const dbMsg = msg as DatabaseMessage & { extra?: DatabaseMessageExtra[] };
+				return ChatService.convertMessageToChatServiceData(dbMsg);
+			} else {
+				// This is already an ApiChatMessageData object
+				return msg as ApiChatMessageData;
+			}
+		});
+
 		// Build base request body with system message injection
-		const processedMessages = this.injectSystemMessage(messages);
+		const processedMessages = this.injectSystemMessage(normalizedMessages);
+
 		const requestBody: ApiChatCompletionRequest = {
 			messages: processedMessages,
 			stream
 		};
+
+		requestBody.reasoning_format = 'auto';
 
 		// pass tool calling config
 		if (tools?.length) requestBody.tools = tools;
@@ -93,7 +136,6 @@ export class ChatService {
 		if (temperature !== undefined) requestBody.temperature = temperature;
 		if (max_tokens !== undefined) requestBody.max_tokens = max_tokens;
 
-		// Add sampling parameters if provided
 		if (dynatemp_range !== undefined) requestBody.dynatemp_range = dynatemp_range;
 		if (dynatemp_exponent !== undefined) requestBody.dynatemp_exponent = dynatemp_exponent;
 		if (top_k !== undefined) requestBody.top_k = top_k;
@@ -103,7 +145,6 @@ export class ChatService {
 		if (xtc_threshold !== undefined) requestBody.xtc_threshold = xtc_threshold;
 		if (typical_p !== undefined) requestBody.typical_p = typical_p;
 
-		// Add penalty parameters if provided
 		if (repeat_last_n !== undefined) requestBody.repeat_last_n = repeat_last_n;
 		if (repeat_penalty !== undefined) requestBody.repeat_penalty = repeat_penalty;
 		if (presence_penalty !== undefined) requestBody.presence_penalty = presence_penalty;
@@ -113,7 +154,6 @@ export class ChatService {
 		if (dry_allowed_length !== undefined) requestBody.dry_allowed_length = dry_allowed_length;
 		if (dry_penalty_last_n !== undefined) requestBody.dry_penalty_last_n = dry_penalty_last_n;
 
-		// Add sampler configuration if provided
 		if (samplers !== undefined) {
 			requestBody.samplers =
 				typeof samplers === 'string'
@@ -121,7 +161,8 @@ export class ChatService {
 					: samplers;
 		}
 
-		// Add custom parameters if provided
+		if (timings_per_token !== undefined) requestBody.timings_per_token = timings_per_token;
+
 		if (custom) {
 			try {
 				const customParams = typeof custom === 'string' ? JSON.parse(custom) : custom;
@@ -152,8 +193,7 @@ export class ChatService {
 						errorMessage = 'Unauthorized - check server authentication';
 						break;
 					case 404:
-						errorMessage =
-							'Chat endpoint not found - server may not support chat completions';
+						errorMessage = 'Chat endpoint not found - server may not support chat completions';
 						break;
 					case 500:
 						errorMessage = 'Server internal error - check server logs';
@@ -186,29 +226,29 @@ export class ChatService {
 				return;
 			}
 
-			// Handle network errors with user-friendly messages
-			let friendlyError: Error;
+			let userFriendlyError: Error;
+
 			if (error instanceof Error) {
 				if (error.name === 'TypeError' && error.message.includes('fetch')) {
-					friendlyError = new Error(
+					userFriendlyError = new Error(
 						'Unable to connect to server - please check if the server is running'
 					);
 				} else if (error.message.includes('ECONNREFUSED')) {
-					friendlyError = new Error('Connection refused - server may be offline');
+					userFriendlyError = new Error('Connection refused - server may be offline');
 				} else if (error.message.includes('ETIMEDOUT')) {
-					friendlyError = new Error('Request timeout - server may be overloaded');
+					userFriendlyError = new Error('Request timeout - server may be overloaded');
 				} else {
-					friendlyError = error;
+					userFriendlyError = error;
 				}
 			} else {
-				friendlyError = new Error('Unknown error occurred while sending message');
+				userFriendlyError = new Error('Unknown error occurred while sending message');
 			}
 
 			console.error('Error in sendMessage:', error);
 			if (onError) {
-				onError(friendlyError);
+				onError(userFriendlyError);
 			}
-			throw friendlyError;
+			throw userFriendlyError;
 		}
 	}
 
@@ -242,9 +282,6 @@ export class ChatService {
 		const decoder = new TextDecoder();
 		let fullResponse = '';
 		let fullReasoningContent = '';
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		let thinkContent = '';
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		let regularContent = '';
 		let insideThinkTag = false;
 		let hasReceivedData = false;
@@ -325,15 +362,15 @@ export class ChatService {
 							insideThinkTag = this.processContentForThinkTags(
 								content,
 								insideThinkTag,
-								(thinkChunk) => {
-									thinkContent += thinkChunk;
+								() => {
+									// Think content is ignored - we don't include it in API requests
 								},
 								(regularChunk) => {
 									regularContent += regularChunk;
 								}
 							);
 
-							// Only send the new regular content that was added in this chunk
+
 							const newRegularContent = regularContent.slice(regularContentBefore.length);
 							if (newRegularContent) {
 								onChunk?.(newRegularContent);
@@ -392,14 +429,15 @@ export class ChatService {
 		response: Response,
 		onComplete?: (response: string, reasoningContent?: string) => void,
 		onError?: (error: Error) => void,
-		onToolCalls?: (calls: ApiToolCall[]) => void
+	  onToolCalls?: (calls: ApiToolCall[]) => void
 	): Promise<string> {
 		try {
-			// Check if response body is empty
 			const responseText = await response.text();
+
 			if (!responseText.trim()) {
-				// Empty response - likely a context error
-				const contextError = new Error('The request exceeds the available context size. Try increasing the context size or enable context shift.');
+				const contextError = new Error(
+					'The request exceeds the available context size. Try increasing the context size or enable context shift.'
+				);
 				contextError.name = 'ContextError';
 				onError?.(contextError);
 				throw contextError;
@@ -437,7 +475,6 @@ export class ChatService {
 
 			return content;
 		} catch (error) {
-			// If it's already a ContextError, re-throw it
 			if (error instanceof Error && error.name === 'ContextError') {
 				throw error;
 			}
@@ -487,6 +524,7 @@ export class ChatService {
 			const imageFiles = (message.extra || []).filter(
 				(e: DatabaseMessageExtra): e is DatabaseMessageExtraImageFile =>
 					e.type === 'imageFile'
+
 			);
 			for (const image of imageFiles) {
 				contentParts.push({ type: 'image_url', image_url: { url: image.base64Url } });
@@ -495,6 +533,7 @@ export class ChatService {
 			const textFiles = (message.extra || []).filter(
 				(e: DatabaseMessageExtra): e is DatabaseMessageExtraTextFile =>
 					e.type === 'textFile'
+
 			);
 			for (const textFile of textFiles) {
 				contentParts.push({
@@ -506,6 +545,7 @@ export class ChatService {
 			const audioFiles = (message.extra || []).filter(
 				(e: DatabaseMessageExtra): e is DatabaseMessageExtraAudioFile =>
 					e.type === 'audioFile'
+
 			);
 			for (const audio of audioFiles) {
 				contentParts.push({
@@ -518,11 +558,12 @@ export class ChatService {
 			}
 
 			const pdfFiles = (message.extra || []).filter(
-				(e: DatabaseMessageExtra): e is DatabaseMessageExtraPdfFile => e.type === 'pdfFile'
+				(e: DatabaseMessageExtra): e is DatabaseMessageExtraPdfFile =>
+				e.type === 'pdfFile'
 			);
 			for (const pdfFile of pdfFiles) {
 				if (pdfFile.processedAsImages && pdfFile.images) {
-					// If PDF was processed as images, add each page as an image
+
 					for (let i = 0; i < pdfFile.images.length; i++) {
 						contentParts.push({
 							type: 'image_url',
@@ -530,7 +571,7 @@ export class ChatService {
 						});
 					}
 				} else {
-					// If PDF was processed as text, add as text content
+
 					contentParts.push({
 						type: 'text',
 						text: `\n\n--- PDF File: ${pdfFile.name} ---\n${pdfFile.content}`
@@ -561,87 +602,6 @@ export class ChatService {
 			role: message.role as Exclude<ChatRole, 'tool'>,
 			content: hasExtras ? contentParts : (message.content ?? '')
 		};
-	}
-
-	/**
-	 * Unified method to send chat completions supporting both ApiChatMessageData and DatabaseMessage types.
-	 * Automatically converts database messages with attachments to the appropriate API format.
-	 *
-	 * @param messages - Array of messages in either API format or database format with attachments
-	 * @param options - Configuration options for the chat completion
-	 * @param options.stream - Whether to use streaming response (default: true)
-	 * @param options.temperature - Controls randomness in generation (default: 0.7)
-	 * @param options.max_tokens - Maximum number of tokens to generate (default: 2048)
-	 * @param options.onChunk - Callback for streaming response chunks
-	 * @param options.onComplete - Callback when response is complete
-	 * @param options.onError - Callback for error handling
-	 * @returns Promise that resolves to the complete response string or void for streaming
-	 */
-	async sendChatCompletion(
-		messages:
-			| (ApiRequestMessage[] | DatabaseMessage[])
-			| (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
-		options: {
-			stream?: boolean;
-			temperature?: number;
-			max_tokens?: number;
-			onChunk?: (chunk: string) => void;
-			onReasoningChunk?: (chunk: string) => void;
-			onComplete?: (response?: string, reasoningContent?: string) => void;
-			onError?: (error: Error) => void;
-		} & ToolOptions = {}
-	): Promise<string | void> {
-		// Preserve API-shaped objects; convert only DB messages
-		const normalizedMessages: ApiRequestMessage[] = messages.map((msg: any) => {
-			if ('id' in msg && 'convId' in msg && 'timestamp' in msg) {
-				// DatabaseMessage → ApiRequestMessage
-				return ChatService.convertMessageToChatServiceData(
-					msg as DatabaseMessage & { extra?: DatabaseMessageExtra[] }
-				);
-			}
-			// Already API-shaped (may include tool_calls / tool_call_id)
-			return msg as ApiRequestMessage;
-		});
-
-		// Set default options for API compatibility
-		const finalOptions = {
-			stream: true,
-			temperature: 0.7,
-			max_tokens: 2048,
-			...options
-		};
-
-		return this.sendMessage(normalizedMessages, finalOptions);
-	}
-
-	/**
-	 * Static method for backward compatibility with the legacy ApiService.
-	 * Creates a temporary ChatService instance and sends a chat completion request.
-	 *
-	 * @param messages - Array of database messages to send
-	 * @param onChunk - Optional callback for streaming response chunks
-	 * @param onComplete - Optional callback when response is complete
-	 * @param onError - Optional callback for error handling
-	 * @returns Promise that resolves to the complete response string
-	 * @static
-	 * @deprecated Use ChatService instance methods instead
-	 */
-	static async sendChatCompletion(
-		messages: DatabaseMessage[],
-		onChunk?: (content: string) => void,
-		onComplete?: () => void,
-		onError?: (error: Error) => void
-	): Promise<string> {
-		const service = new ChatService();
-		const result = await service.sendChatCompletion(messages, {
-			stream: true,
-			temperature: 0.7,
-			max_tokens: 2048,
-			onChunk,
-			onComplete: () => onComplete?.(),
-			onError
-		});
-		return result as string;
 	}
 
 	/**
@@ -688,21 +648,18 @@ export class ChatService {
 		let insideThinkTag = currentInsideThinkTag;
 
 		while (i < content.length) {
-			// Check for opening <think> tag
 			if (!insideThinkTag && content.substring(i, i + 7) === '<think>') {
 				insideThinkTag = true;
 				i += 7; // Skip the <think> tag
 				continue;
 			}
 
-			// Check for closing </think> tag
 			if (insideThinkTag && content.substring(i, i + 8) === '</think>') {
 				insideThinkTag = false;
 				i += 8; // Skip the </think> tag
 				continue;
 			}
 
-			// Add character to appropriate content bucket
 			if (insideThinkTag) {
 				addThinkContent(content[i]);
 			} else {
@@ -741,17 +698,23 @@ export class ChatService {
 		const currentConfig = config();
 		const systemMessage = currentConfig.systemMessage?.toString().trim();
 
-		// If no system message is configured, return messages as-is
 		if (!systemMessage) {
 			return messages;
 		}
 
-		// Check if first message is already a system message
 		if (messages.length > 0 && messages[0].role === 'system') {
+			if (messages[0].content !== systemMessage) {
+				const updatedMessages = [...messages];
+				updatedMessages[0] = {
+					role: 'system',
+					content: systemMessage
+				};
+				return updatedMessages;
+			}
+
 			return messages;
 		}
 
-		// Inject system message at the beginning
 		const systemMsg: ApiChatMessageData = {
 			role: 'system',
 			content: systemMessage
@@ -760,3 +723,5 @@ export class ChatService {
 		return [systemMsg, ...messages];
 	}
 }
+
+export const chatService = new ChatService();

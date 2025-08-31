@@ -1,35 +1,32 @@
 <script lang="ts">
 	import { ChatAttachmentImagePreview, ChatAttachmentFilePreview } from '$lib/components/app';
 	import ChatAttachmentPreviewDialog from './ChatAttachmentPreviewDialog.svelte';
-	import {
-		FileTypeCategory,
-		getFileTypeCategory
-	} from '$lib/constants/supported-file-types';
+	import { FileTypeCategory, getFileTypeCategory } from '$lib/constants/supported-file-types';
 
 	interface Props {
 		class?: string;
-		// For ChatForm - pending uploads
-		uploadedFiles?: ChatUploadedFile[];
-		onFileRemove?: (fileId: string) => void;
 		// For ChatMessage - stored attachments
 		attachments?: DatabaseMessageExtra[];
 		readonly?: boolean;
+		// For ChatForm - pending uploads
+		onFileRemove?: (fileId: string) => void;
+		uploadedFiles?: ChatUploadedFile[];
 		// Image size customization
+		imageClass?: string;
 		imageHeight?: string;
 		imageWidth?: string;
-		imageClass?: string;
 	}
 
 	let {
-		uploadedFiles = $bindable([]),
-		onFileRemove,
+		class: className = '',
 		attachments = [],
 		readonly = false,
-		class: className = '',
+		onFileRemove,
+		uploadedFiles = $bindable([]),
 		// Default to small size for form previews
+		imageClass = '',
 		imageHeight = 'h-24',
-		imageWidth = 'w-auto',
-		imageClass = ''
+		imageWidth = 'w-auto'
 	}: Props = $props();
 
 	let displayItems = $derived(getDisplayItems());
@@ -45,24 +42,6 @@
 		size?: number;
 		textContent?: string;
 	} | null>(null);
-
-	function openPreview(item: (typeof displayItems)[0], event?: Event) {
-		if (event) {
-			event.preventDefault();
-			event.stopPropagation();
-		}
-
-		previewItem = {
-			uploadedFile: item.uploadedFile,
-			attachment: item.attachment,
-			preview: item.preview,
-			name: item.name,
-			type: item.type,
-			size: item.size,
-			textContent: item.textContent
-		};
-		previewDialogOpen = true;
-	}
 
 	function getDisplayItems() {
 		const items: Array<{
@@ -138,6 +117,24 @@
 
 		return items;
 	}
+
+	function openPreview(item: (typeof displayItems)[0], event?: Event) {
+		if (event) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+
+		previewItem = {
+			uploadedFile: item.uploadedFile,
+			attachment: item.attachment,
+			preview: item.preview,
+			name: item.name,
+			type: item.type,
+			size: item.size,
+			textContent: item.textContent
+		};
+		previewDialogOpen = true;
+	}
 </script>
 
 {#if displayItems.length > 0}
@@ -149,7 +146,6 @@
 					id={item.id}
 					name={item.name}
 					preview={item.preview}
-					size={item.size}
 					{readonly}
 					onRemove={onFileRemove}
 					height={imageHeight}

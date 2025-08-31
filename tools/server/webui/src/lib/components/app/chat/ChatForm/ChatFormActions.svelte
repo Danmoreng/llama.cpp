@@ -1,42 +1,43 @@
 <script lang="ts">
-    import {Button} from '$lib/components/ui/button';
-    import {Square, ArrowUp, Code} from '@lucide/svelte';
-    import ChatFormActionFileAttachments from './ChatFormActionFileAttachments.svelte';
-    import ChatFormActionRecord from './ChatFormActionRecord.svelte';
+	import { Square, ArrowUp, Code } from '@lucide/svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { FileTypeCategory } from '$lib/constants/supported-file-types';
+	import ChatFormActionFileAttachments from './ChatFormActionFileAttachments.svelte';
+	import ChatFormActionRecord from './ChatFormActionRecord.svelte';
     import * as Tooltip from '$lib/components/ui/tooltip';
     import { TOOLTIP_DELAY_DURATION } from '$lib/constants/tooltip-config';
 
-    interface Props {
-        disabled?: boolean;
-        isLoading?: boolean;
-        canSend?: boolean;
-        onFileUpload?: (fileType?: 'image' | 'audio' | 'file' | 'pdf') => void;
-        onStop?: () => void;
-        onMicClick?: () => void;
-        isRecording?: boolean;
+	interface Props {
+		canSend?: boolean;
+		class?: string;
+		disabled?: boolean;
+		isLoading?: boolean;
+		isRecording?: boolean;
         showCodeEditor?: boolean;
         onToggleCodeEditor?: () => void;
-        class?: string;
-    }
+		onFileUpload?: (fileType?: FileTypeCategory) => void;
+		onMicClick?: () => void;
+		onStop?: () => void;
+	}
 
-    let {
-        disabled = false,
-        isLoading = false,
-        canSend = false,
-        onFileUpload,
-        onStop,
-        onMicClick,
-        isRecording = false,
+	let {
+		canSend = false,
+		class: className = '',
+		disabled = false,
+		isLoading = false,
+		isRecording = false,
         showCodeEditor = false,
         onToggleCodeEditor,
-        class: className = ''
-    }: Props = $props();
+		onFileUpload,
+		onMicClick,
+		onStop
+	}: Props = $props();
 </script>
 
 <div class="flex items-center justify-between gap-1 {className}">
     <div class="flex gap-2">
         <ChatFormActionFileAttachments
-            disabled={disabled}
+            {disabled}
             {onFileUpload}
         />
         <Tooltip.Root delayDuration={TOOLTIP_DELAY_DURATION}>
@@ -63,7 +64,7 @@
             <Button
                 type="button"
                 onclick={onStop}
-                class="p-0 h-8 w-8 bg-transparent hover:bg-destructive/20"
+                class="h-8 w-8 bg-transparent p-0hover:bg-destructive/20"
             >
                 <span class="sr-only">Stop</span>
                 <Square class="h-8 w-8 fill-destructive stroke-destructive"/>
