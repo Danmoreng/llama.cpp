@@ -90,7 +90,10 @@ export class ChatService {
 			custom,
 			timings_per_token,
 			// Config options
-			disableReasoningFormat
+			disableReasoningFormat,
+			// Tools
+			tools,
+			tool_choice
 		} = options;
 
 		const normalizedMessages: ApiChatMessageData[] = messages
@@ -114,10 +117,15 @@ export class ChatService {
 			});
 
 		const requestBody: ApiChatCompletionRequest = {
-			messages: normalizedMessages.map((msg: ApiChatMessageData) => ({
-				role: msg.role,
-				content: msg.content
-			})),
+			messages: normalizedMessages.map((msg: ApiChatMessageData) => {
+				const apiMsg: any = {
+					role: msg.role,
+					content: msg.content
+				};
+				if (msg.tool_calls) apiMsg.tool_calls = msg.tool_calls;
+				if (msg.tool_call_id) apiMsg.tool_call_id = msg.tool_call_id;
+				return apiMsg;
+			}),
 			stream,
 			return_progress: stream ? true : undefined
 		};
@@ -163,6 +171,9 @@ export class ChatService {
 		if (backend_sampling !== undefined) requestBody.backend_sampling = backend_sampling;
 
 		if (timings_per_token !== undefined) requestBody.timings_per_token = timings_per_token;
+
+		if (tools !== undefined) requestBody.tools = tools;
+		if (tool_choice !== undefined) requestBody.tool_choice = tool_choice;
 
 		if (custom) {
 			try {
@@ -582,11 +593,25 @@ export class ChatService {
 	static convertDbMessageToApiChatMessageData(
 		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
 	): ApiChatMessageData {
+		const apiMsg: ApiChatMessageData = {
+			role: message.role as ChatRole,
+			content: message.content
+		};
+
+		if (message.toolCalls) {
+			try {
+				apiMsg.tool_calls = JSON.parse(message.toolCalls);
+			} catch (e) {
+				console.error('Failed to parse toolCalls for API:', e);
+			}
+		}
+
+		if (message.tool_call_id) {
+			apiMsg.tool_call_id = message.tool_call_id;
+		}
+
 		if (!message.extra || message.extra.length === 0) {
-			return {
-				role: message.role as 'user' | 'assistant' | 'system',
-				content: message.content
-			};
+			return apiMsg;
 		}
 
 		const contentParts: ApiChatMessageContentPart[] = [];
@@ -671,10 +696,8 @@ export class ChatService {
 			}
 		}
 
-		return {
-			role: message.role as 'user' | 'assistant' | 'system',
-			content: contentParts
-		};
+		apiMsg.content = contentParts;
+		return apiMsg;
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────────

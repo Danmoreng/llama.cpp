@@ -36,8 +36,10 @@
 	import { parseFilesToMessageExtras, processFilesToChatUploaded } from '$lib/utils/browser-only';
 	import { onMount } from 'svelte';
 	import { fade, fly, slide } from 'svelte/transition';
-	import { Trash2, AlertTriangle, RefreshCw } from '@lucide/svelte';
+	import { Trash2, AlertTriangle, RefreshCw, Layout } from '@lucide/svelte';
 	import ChatScreenDragOverlay from './ChatScreenDragOverlay.svelte';
+	import CodeEditor from '../ChatHTMLEditor/CodeEditor.svelte';
+	import { Button } from '$lib/components/ui/button';
 
 	let { showCenteredEmpty = false } = $props();
 
@@ -70,6 +72,8 @@
 	let showEmptyFileDialog = $state(false);
 
 	let emptyFileNames = $state<string[]>([]);
+
+	let showEditor = $state(false);
 
 	let isEmpty = $derived(
 		showCenteredEmpty && !activeConversation() && activeMessages().length === 0 && !isLoading()
@@ -370,7 +374,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<ChatScreenHeader />
+<ChatScreenHeader {showEditor} onToggleEditor={() => (showEditor = !showEditor)} />
 
 {#if !isEmpty}
 	<div

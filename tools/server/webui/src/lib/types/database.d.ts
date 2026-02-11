@@ -63,6 +63,7 @@ export interface DatabaseMessage {
 	parent: string;
 	thinking: string;
 	toolCalls?: string;
+	tool_call_id?: string;
 	children: string[];
 	extra?: DatabaseMessageExtra[];
 	timings?: ChatMessageTimings;

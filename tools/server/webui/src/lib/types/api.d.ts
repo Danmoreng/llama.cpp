@@ -33,8 +33,10 @@ export interface ApiErrorResponse {
 
 export interface ApiChatMessageData {
 	role: ChatRole;
-	content: string | ApiChatMessageContentPart[];
+	content: string | ApiChatMessageContentPart[] | null;
 	timestamp?: number;
+	tool_calls?: ApiChatCompletionToolCall[];
+	tool_call_id?: string;
 }
 
 /**
@@ -217,6 +219,9 @@ export interface ApiChatCompletionRequest {
 	// Custom parameters (JSON string)
 	custom?: Record<string, unknown>;
 	timings_per_token?: boolean;
+	// Tools
+	tools?: any[];
+	tool_choice?: string | object;
 }
 
 export interface ApiChatCompletionToolCallFunctionDelta {

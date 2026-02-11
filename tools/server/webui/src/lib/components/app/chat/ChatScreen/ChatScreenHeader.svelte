@@ -1,8 +1,15 @@
 <script lang="ts">
-	import { Settings } from '@lucide/svelte';
+	import { Settings, Layout } from '@lucide/svelte';
 	import { DialogChatSettings } from '$lib/components/app';
 	import { Button } from '$lib/components/ui/button';
 	import { useSidebar } from '$lib/components/ui/sidebar';
+
+	interface Props {
+		showEditor: boolean;
+		onToggleEditor: () => void;
+	}
+
+	let { showEditor, onToggleEditor }: Props = $props();
 
 	const sidebar = useSidebar();
 
@@ -19,6 +26,14 @@
 		: ''}"
 >
 	<div class="pointer-events-auto flex items-center space-x-2">
+		<Button
+			variant={showEditor ? 'default' : 'ghost'}
+			size="sm"
+			onclick={onToggleEditor}
+			title="Toggle Code Editor"
+		>
+			<Layout class="h-4 w-4" />
+		</Button>
 		<Button variant="ghost" size="sm" onclick={toggleSettings}>
 			<Settings class="h-4 w-4" />
 		</Button>
