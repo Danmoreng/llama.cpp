@@ -15,6 +15,7 @@ import {
 } from '$lib/utils';
 import { SvelteMap } from 'svelte/reactivity';
 import { DEFAULT_CONTEXT } from '$lib/constants/default-context';
+import { editorToolDefinitions, executeEditorTool } from '$lib/services/editor-tools';
 
 /**
  * chatStore - Active AI interaction and streaming state management
@@ -589,9 +590,18 @@ class ChatStore {
 					await conversationsStore.updateCurrentNode(assistantMessage.id);
 
 					if (onComplete) await onComplete(streamedContent);
-					this.setChatLoading(assistantMessage.convId, false);
+					
+					const toolCallsToProcess = toolCallContent || streamedToolCallContent;
+
+					if (toolCallsToProcess) {
+						// Don't clear loading state if we're about to process tool calls
+						await this.handleToolCalls(assistantMessage.convId, assistantMessage.id, toolCallsToProcess);
+					} else {
+						this.setChatLoading(assistantMessage.convId, false);
+						this.clearProcessingState(assistantMessage.convId);
+					}
+					
 					this.clearChatStreaming(assistantMessage.convId);
-					this.clearProcessingState(assistantMessage.convId);
 
 					if (isRouterMode()) {
 						modelsStore.fetchRouterModels().catch(console.error);
@@ -637,6 +647,56 @@ class ChatStore {
 			assistantMessage.convId,
 			abortController.signal
 		);
+	}
+
+	private async handleToolCalls(
+		convId: string,
+		assistantMessageId: string,
+		toolCallContent: string
+	): Promise<void> {
+		try {
+			const toolCalls = JSON.parse(toolCallContent) as ApiChatCompletionToolCall[];
+			if (!toolCalls || toolCalls.length === 0) return;
+
+			let currentParentId = assistantMessageId;
+
+			for (const call of toolCalls) {
+				const result = await executeEditorTool(call);
+
+				// Add tool message to database
+				const toolMessage = await DatabaseService.createMessageBranch(
+					{
+						convId,
+						role: 'tool' as any, // 'tool' is used by API, might need to adjust ChatRole type if it's too strict
+						content: result,
+						timestamp: Date.now(),
+						thinking: '',
+						toolCalls: '',
+						children: [],
+						tool_call_id: call.id
+					} as any,
+					currentParentId
+				);
+
+				conversationsStore.addMessageToActive(toolMessage);
+				currentParentId = toolMessage.id;
+			}
+
+			await conversationsStore.updateCurrentNode(currentParentId);
+
+			// Re-trigger generation with tool results
+			const allMessages = await conversationsStore.getConversationMessages(convId);
+			const conversationPath = filterByLeafNodeId(allMessages, currentParentId, false) as DatabaseMessage[];
+			
+			// Create a new assistant message for the next turn
+			const nextAssistantMessage = await this.createAssistantMessage(currentParentId);
+			if (nextAssistantMessage) {
+				conversationsStore.addMessageToActive(nextAssistantMessage);
+				await this.streamChatCompletion(conversationPath, nextAssistantMessage);
+			}
+		} catch (e) {
+			console.error('Error in handleToolCalls:', e);
+		}
 	}
 
 	async sendMessage(content: string, extras?: DatabaseMessageExtra[]): Promise<void> {
@@ -1464,6 +1524,9 @@ class ChatStore {
 		if (currentConfig.backend_sampling)
 			apiOptions.backend_sampling = currentConfig.backend_sampling;
 		if (currentConfig.custom) apiOptions.custom = currentConfig.custom;
+
+		// Inject editor tools
+		apiOptions.tools = editorToolDefinitions;
 
 		return apiOptions;
 	}
