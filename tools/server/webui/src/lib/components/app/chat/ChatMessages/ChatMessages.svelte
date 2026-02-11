@@ -42,10 +42,12 @@
 			return [];
 		}
 
-		// Filter out system messages if showSystemMessage is false
-		const filteredMessages = currentConfig.showSystemMessage
-			? messages
-			: messages.filter((msg) => msg.type !== 'system');
+		// Filter out system messages if showSystemMessage is false, and always filter out 'tool' role messages
+		const filteredMessages = messages.filter((msg) => {
+			if (msg.role === 'tool') return false;
+			if (msg.type === 'system' && !currentConfig.showSystemMessage) return false;
+			return true;
+		});
 
 		return filteredMessages.map((message) => {
 			const siblingInfo = getMessageSiblings(allConversationMessages, message.id);
