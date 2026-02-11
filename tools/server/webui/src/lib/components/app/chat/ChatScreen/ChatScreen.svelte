@@ -376,132 +376,142 @@
 
 <ChatScreenHeader {showEditor} onToggleEditor={() => (showEditor = !showEditor)} />
 
-{#if !isEmpty}
-	<div
-		bind:this={chatScrollContainer}
-		aria-label="Chat interface with file drop zone"
-		class="flex h-full flex-col overflow-y-auto px-4 md:px-6"
-		ondragenter={handleDragEnter}
-		ondragleave={handleDragLeave}
-		ondragover={handleDragOver}
-		ondrop={handleDrop}
-		onscroll={handleScroll}
-		role="main"
-	>
-		<ChatMessages
-			class="mb-16 md:mb-24"
-			messages={activeMessages()}
-			onUserAction={() => {
-				if (!disableAutoScroll) {
-					userScrolledUp = false;
-					autoScrollEnabled = true;
-					scrollChatToBottom();
-				}
-			}}
-		/>
+<div class="flex h-full w-full overflow-hidden">
+	<div class="flex h-full min-w-0 flex-1 flex-col">
+		{#if !isEmpty}
+			<div
+				bind:this={chatScrollContainer}
+				aria-label="Chat interface with file drop zone"
+				class="flex h-full flex-col overflow-y-auto px-4 md:px-6"
+				ondragenter={handleDragEnter}
+				ondragleave={handleDragLeave}
+				ondragover={handleDragOver}
+				ondrop={handleDrop}
+				onscroll={handleScroll}
+				role="main"
+			>
+				<ChatMessages
+					class="mb-16 md:mb-24"
+					messages={activeMessages()}
+					onUserAction={() => {
+						if (!disableAutoScroll) {
+							userScrolledUp = false;
+							autoScrollEnabled = true;
+							scrollChatToBottom();
+						}
+					}}
+				/>
 
-		<div
-			class="pointer-events-none sticky right-0 bottom-0 left-0 mt-auto"
-			in:slide={{ duration: 150, axis: 'y' }}
-		>
-			<ChatScreenProcessingInfo />
-
-			{#if hasPropsError}
 				<div
-					class="pointer-events-auto mx-auto mb-4 max-w-[48rem] px-1"
-					in:fly={{ y: 10, duration: 250 }}
+					class="pointer-events-none sticky right-0 bottom-0 left-0 mt-auto"
+					in:slide={{ duration: 150, axis: 'y' }}
 				>
-					<Alert.Root variant="destructive">
-						<AlertTriangle class="h-4 w-4" />
-						<Alert.Title class="flex items-center justify-between">
-							<span>Server unavailable</span>
-							<button
-								onclick={() => serverStore.fetch()}
-								disabled={isServerLoading}
-								class="flex items-center gap-1.5 rounded-lg bg-destructive/20 px-2 py-1 text-xs font-medium hover:bg-destructive/30 disabled:opacity-50"
-							>
-								<RefreshCw class="h-3 w-3 {isServerLoading ? 'animate-spin' : ''}" />
-								{isServerLoading ? 'Retrying...' : 'Retry'}
-							</button>
-						</Alert.Title>
-						<Alert.Description>{serverError()}</Alert.Description>
-					</Alert.Root>
+					<ChatScreenProcessingInfo />
+
+					{#if hasPropsError}
+						<div
+							class="pointer-events-auto mx-auto mb-4 max-w-[48rem] px-1"
+							in:fly={{ y: 10, duration: 250 }}
+						>
+							<Alert.Root variant="destructive">
+								<AlertTriangle class="h-4 w-4" />
+								<Alert.Title class="flex items-center justify-between">
+									<span>Server unavailable</span>
+									<button
+										onclick={() => serverStore.fetch()}
+										disabled={isServerLoading}
+										class="flex items-center gap-1.5 rounded-lg bg-destructive/20 px-2 py-1 text-xs font-medium hover:bg-destructive/30 disabled:opacity-50"
+									>
+										<RefreshCw class="h-3 w-3 {isServerLoading ? 'animate-spin' : ''}" />
+										{isServerLoading ? 'Retrying...' : 'Retry'}
+									</button>
+								</Alert.Title>
+								<Alert.Description>{serverError()}</Alert.Description>
+							</Alert.Root>
+						</div>
+					{/if}
+
+					<div class="conversation-chat-form pointer-events-auto rounded-t-3xl pb-4">
+						<ChatForm
+							disabled={hasPropsError || isEditing()}
+							isLoading={isCurrentConversationLoading}
+							onFileRemove={handleFileRemove}
+							onFileUpload={handleFileUpload}
+							onSend={handleSendMessage}
+							onStop={() => chatStore.stopGeneration()}
+							showHelperText={false}
+							bind:uploadedFiles
+						/>
+					</div>
 				</div>
-			{/if}
-
-			<div class="conversation-chat-form pointer-events-auto rounded-t-3xl pb-4">
-				<ChatForm
-					disabled={hasPropsError || isEditing()}
-					isLoading={isCurrentConversationLoading}
-					onFileRemove={handleFileRemove}
-					onFileUpload={handleFileUpload}
-					onSend={handleSendMessage}
-					onStop={() => chatStore.stopGeneration()}
-					showHelperText={false}
-					bind:uploadedFiles
-				/>
 			</div>
-		</div>
-	</div>
-{:else if isServerLoading}
-	<!-- Server Loading State -->
-	<ServerLoadingSplash />
-{:else}
-	<div
-		aria-label="Welcome screen with file drop zone"
-		class="flex h-full items-center justify-center"
-		ondragenter={handleDragEnter}
-		ondragleave={handleDragLeave}
-		ondragover={handleDragOver}
-		ondrop={handleDrop}
-		role="main"
-	>
-		<div class="w-full max-w-[48rem] px-4">
-			<div class="mb-10 text-center" in:fade={{ duration: 300 }}>
-				<h1 class="mb-4 text-3xl font-semibold tracking-tight">llama.cpp</h1>
+		{:else if isServerLoading}
+			<!-- Server Loading State -->
+			<ServerLoadingSplash />
+		{:else}
+			<div
+				aria-label="Welcome screen with file drop zone"
+				class="flex h-full items-center justify-center"
+				ondragenter={handleDragEnter}
+				ondragleave={handleDragLeave}
+				ondragover={handleDragOver}
+				ondrop={handleDrop}
+				role="main"
+			>
+				<div class="w-full max-w-[48rem] px-4">
+					<div class="mb-10 text-center" in:fade={{ duration: 300 }}>
+						<h1 class="mb-4 text-3xl font-semibold tracking-tight">llama.cpp</h1>
 
-				<p class="text-lg text-muted-foreground">
-					{serverStore.props?.modalities?.audio
-						? 'Record audio, type a message '
-						: 'Type a message'} or upload files to get started
-				</p>
-			</div>
+						<p class="text-lg text-muted-foreground">
+							{serverStore.props?.modalities?.audio
+								? 'Record audio, type a message '
+								: 'Type a message'} or upload files to get started
+						</p>
+					</div>
 
-			{#if hasPropsError}
-				<div class="mb-4" in:fly={{ y: 10, duration: 250 }}>
-					<Alert.Root variant="destructive">
-						<AlertTriangle class="h-4 w-4" />
-						<Alert.Title class="flex items-center justify-between">
-							<span>Server unavailable</span>
-							<button
-								onclick={() => serverStore.fetch()}
-								disabled={isServerLoading}
-								class="flex items-center gap-1.5 rounded-lg bg-destructive/20 px-2 py-1 text-xs font-medium hover:bg-destructive/30 disabled:opacity-50"
-							>
-								<RefreshCw class="h-3 w-3 {isServerLoading ? 'animate-spin' : ''}" />
-								{isServerLoading ? 'Retrying...' : 'Retry'}
-							</button>
-						</Alert.Title>
-						<Alert.Description>{serverError()}</Alert.Description>
-					</Alert.Root>
+					{#if hasPropsError}
+						<div class="mb-4" in:fly={{ y: 10, duration: 250 }}>
+							<Alert.Root variant="destructive">
+								<AlertTriangle class="h-4 w-4" />
+								<Alert.Title class="flex items-center justify-between">
+									<span>Server unavailable</span>
+									<button
+										onclick={() => serverStore.fetch()}
+										disabled={isServerLoading}
+										class="flex items-center gap-1.5 rounded-lg bg-destructive/20 px-2 py-1 text-xs font-medium hover:bg-destructive/30 disabled:opacity-50"
+									>
+										<RefreshCw class="h-3 w-3 {isServerLoading ? 'animate-spin' : ''}" />
+										{isServerLoading ? 'Retrying...' : 'Retry'}
+									</button>
+								</Alert.Title>
+								<Alert.Description>{serverError()}</Alert.Description>
+							</Alert.Root>
+						</div>
+					{/if}
+
+					<div in:fly={{ y: 10, duration: 250, delay: hasPropsError ? 0 : 300 }}>
+						<ChatForm
+							disabled={hasPropsError}
+							isLoading={isCurrentConversationLoading}
+							onFileRemove={handleFileRemove}
+							onFileUpload={handleFileUpload}
+							onSend={handleSendMessage}
+							onStop={() => chatStore.stopGeneration()}
+							showHelperText={true}
+							bind:uploadedFiles
+						/>
+					</div>
 				</div>
-			{/if}
-
-			<div in:fly={{ y: 10, duration: 250, delay: hasPropsError ? 0 : 300 }}>
-				<ChatForm
-					disabled={hasPropsError}
-					isLoading={isCurrentConversationLoading}
-					onFileRemove={handleFileRemove}
-					onFileUpload={handleFileUpload}
-					onSend={handleSendMessage}
-					onStop={() => chatStore.stopGeneration()}
-					showHelperText={true}
-					bind:uploadedFiles
-				/>
 			</div>
-		</div>
+		{/if}
 	</div>
-{/if}
+
+	{#if showEditor}
+		<div class="h-full w-full max-w-[50%] border-l border-border bg-background" transition:slide={{ axis: 'x', duration: 300 }}>
+			<CodeEditor />
+		</div>
+	{/if}
+</div>
 
 <!-- File Upload Error Alert Dialog -->
 <AlertDialog.Root bind:open={showFileErrorDialog}>
