@@ -40,7 +40,7 @@ $StorybookProcess = Start-Process npx -ArgumentList "storybook dev -p 6006 --ci"
 $ViteProcess = Start-Process npx -ArgumentList "vite dev --host 0.0.0.0" -PassThru -NoNewWindow
 
 Write-Host "🖥️  Servers are running (Storybook on 6006, Vite on 5173)." -ForegroundColor Green
-Write-Host "⌨️  Press Ctrl+C to stop (though you might need to kill the processes manually if they don't respond)." -ForegroundColor Gray
+Write-Host "⌨️  Press Ctrl+C to stop (though you might need to kill the processes manually if they don''t respond)." -ForegroundColor Gray
 
 try {
     # Wait for processes
