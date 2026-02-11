@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "bash scripts/dev.sh",
+		"dev:ps": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
 		"build": "vite build && ./scripts/post-build.sh",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
