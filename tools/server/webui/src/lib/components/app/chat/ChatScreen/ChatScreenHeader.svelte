@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Layout, Settings } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { useSidebar } from '$lib/components/ui/sidebar';
 	import { getChatSettingsDialogContext } from '$lib/contexts';
 
 	interface Props {
@@ -11,15 +10,10 @@
 
 	let { showEditor, onToggleEditor }: Props = $props();
 
-	const sidebar = useSidebar();
 	const chatSettingsDialog = getChatSettingsDialogContext();
 </script>
 
-<header
-	class="pointer-events-none fixed top-0 right-0 left-0 z-50 flex items-center justify-end p-2 duration-200 ease-linear md:p-4 {sidebar.open
-		? 'md:left-[var(--sidebar-width)]'
-		: ''}"
->
+<header class="pointer-events-none absolute top-0 right-0 left-0 z-50 flex items-center justify-end p-2 md:p-4">
 	<div class="pointer-events-auto flex items-center space-x-2">
 		<Button
 			variant={showEditor ? 'default' : 'ghost'}

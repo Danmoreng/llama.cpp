@@ -344,10 +344,10 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<ChatScreenHeader {showEditor} onToggleEditor={() => (showEditor = !showEditor)} />
-
 <div class="flex h-full w-full overflow-hidden">
-	<div class="flex h-full min-w-0 flex-1 flex-col">
+	<div class="relative flex h-full min-w-0 flex-1 flex-col">
+		<ChatScreenHeader {showEditor} onToggleEditor={() => (showEditor = !showEditor)} />
+
 		{#if !isEmpty}
 			<div
 				bind:this={chatScrollContainer}
