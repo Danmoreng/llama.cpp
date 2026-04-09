@@ -20,14 +20,14 @@ if (-not (Test-Path "$ProjectRoot\.git\hooks\pre-commit") -or
 }
 
 if ($HooksMissing) {
-    Write-Host "🔧 Git hooks missing." -ForegroundColor Yellow
-    Write-Host "📝 Note: You can install them by running bash scripts/install-git-hooks.sh if you have git bash." -ForegroundColor Gray
+    Write-Host "Git hooks missing." -ForegroundColor Yellow
+    Write-Host "Note: You can install them by running bash scripts/install-git-hooks.sh if you have git bash." -ForegroundColor Gray
 } else {
-    Write-Host "✅ Git hooks already installed" -ForegroundColor Green
+    Write-Host "Git hooks already installed" -ForegroundColor Green
 }
 
-Write-Host "🚀 Starting development servers..." -ForegroundColor Cyan
-Write-Host "📝 Note: Make sure to start llama-server separately if needed" -ForegroundColor Gray
+Write-Host "Starting development servers..." -ForegroundColor Cyan
+Write-Host "Note: Make sure to start llama-server separately if needed" -ForegroundColor Gray
 
 # Set environment variable for insecure http parser
 $env:NODE_OPTIONS = "--insecure-http-parser"
@@ -39,14 +39,14 @@ $env:NODE_OPTIONS = "--insecure-http-parser"
 $StorybookProcess = Start-Process npx.cmd -ArgumentList "storybook dev -p 6006 --ci" -PassThru -NoNewWindow
 $ViteProcess = Start-Process npx.cmd -ArgumentList "vite dev --host 0.0.0.0" -PassThru -NoNewWindow
 
-Write-Host "🖥️  Servers are running (Storybook on 6006, Vite on 5173)." -ForegroundColor Green
-Write-Host "⌨️  Press Ctrl+C to stop (though you might need to kill the processes manually if they don''t respond)." -ForegroundColor Gray
+Write-Host "Servers are running (Storybook on 6006, Vite on 5173)." -ForegroundColor Green
+Write-Host "Press Ctrl+C to stop (though you might need to kill the processes manually if they don''t respond)." -ForegroundColor Gray
 
 try {
     # Wait for processes
     Wait-Process -Id $StorybookProcess.Id, $ViteProcess.Id
 } catch {
-    Write-Host "`n🧹 Cleaning up..." -ForegroundColor Yellow
+    Write-Host "`nCleaning up..." -ForegroundColor Yellow
     Stop-Process -Id $StorybookProcess.Id -ErrorAction SilentlyContinue
     Stop-Process -Id $ViteProcess.Id -ErrorAction SilentlyContinue
 } finally {
