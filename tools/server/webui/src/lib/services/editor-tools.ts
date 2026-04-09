@@ -1,7 +1,8 @@
 import { editorStore } from '$lib/stores/editor.svelte';
 import type { ApiChatCompletionToolCall } from '$lib/types/api';
+import type { OpenAIToolDefinition } from '$lib/types/mcp';
 
-export const editorToolDefinitions = [
+export const editorToolDefinitions: OpenAIToolDefinition[] = [
 	{
 		type: 'function',
 		function: {
@@ -44,7 +45,7 @@ export const editorToolDefinitions = [
 ];
 
 function escapeRegExp(s: string) {
-	return s.replace(/[.*+?^${}()|[\]\]/g, '\$&');
+	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 const implementations = {
