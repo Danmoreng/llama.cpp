@@ -6,6 +6,14 @@ export const editorToolDefinitions: OpenAIToolDefinition[] = [
 	{
 		type: 'function',
 		function: {
+			name: 'open_code_editor',
+			description: 'Open the HTML code editor panel for the user.',
+			parameters: { type: 'object', properties: {}, additionalProperties: false }
+		}
+	},
+	{
+		type: 'function',
+		function: {
 			name: 'get_editor_code',
 			description: 'Return the current HTML in the editor.',
 			parameters: { type: 'object', properties: {}, additionalProperties: false }
@@ -18,7 +26,9 @@ export const editorToolDefinitions: OpenAIToolDefinition[] = [
 			description: 'Replace the entire HTML code in the editor.',
 			parameters: {
 				type: 'object',
-				properties: { code: { type: 'string', description: 'The full HTML to set in the editor.' } },
+				properties: {
+					code: { type: 'string', description: 'The full HTML to set in the editor.' }
+				},
 				required: ['code'],
 				additionalProperties: false
 			}
@@ -28,7 +38,8 @@ export const editorToolDefinitions: OpenAIToolDefinition[] = [
 		type: 'function',
 		function: {
 			name: 'replace_in_editor_code',
-			description: 'Find and replace text within the current HTML. Use isRegex for regex replacements.',
+			description:
+				'Find and replace text within the current HTML. Use isRegex for regex replacements.',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -49,6 +60,11 @@ function escapeRegExp(s: string) {
 }
 
 const implementations = {
+	async open_code_editor(): Promise<{ status: 'ok'; isOpen: true }> {
+		editorStore.openEditor();
+		return { status: 'ok', isOpen: true };
+	},
+
 	async get_editor_code(): Promise<string> {
 		return editorStore.currentCode;
 	},
@@ -84,7 +100,7 @@ export async function executeEditorTool(call: ApiChatCompletionToolCall): Promis
 	const name = call.function?.name as keyof typeof implementations;
 	const argStr = call.function?.arguments ?? '{}';
 	let args: any = {};
-	
+
 	try {
 		args = JSON.parse(argStr);
 	} catch (e) {
