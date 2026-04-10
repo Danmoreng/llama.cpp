@@ -1,5 +1,5 @@
-import type { ChatMessageTimings, ChatRole, ChatMessageType } from '$lib/types/chat';
-import { AttachmentType } from '$lib/enums';
+import type { ChatMessageTimings } from '$lib/types/chat';
+import { AttachmentType, MessageRole, MessageType } from '$lib/enums';
 
 export interface McpServerOverride {
 	serverId: string;
@@ -83,9 +83,9 @@ export type DatabaseMessageExtra =
 export interface DatabaseMessage {
 	id: string;
 	convId: string;
-	type: ChatMessageType;
+	type: MessageType;
 	timestamp: number;
-	role: ChatRole;
+	role: MessageRole;
 	content: string;
 	parent: string | null;
 	/**
@@ -96,10 +96,6 @@ export interface DatabaseMessage {
 	reasoningContent?: string;
 	/** Serialized JSON array of tool calls made by assistant messages */
 	toolCalls?: string;
-	/**
-	 * @deprecated - kept for compatibility with pre-agentic local tool results
-	 */
-	tool_call_id?: string;
 	/** Tool call ID for tool result messages (role: 'tool') */
 	toolCallId?: string;
 	children: string[];

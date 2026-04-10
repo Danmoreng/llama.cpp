@@ -30,6 +30,7 @@
 	import { config } from '$lib/stores/settings.svelte';
 	import { serverLoading, serverError, serverStore, isRouterMode } from '$lib/stores/server.svelte';
 	import { modelsStore, modelOptions, selectedModelId } from '$lib/stores/models.svelte';
+	import { editorStore } from '$lib/stores/editor.svelte';
 	import { isFileTypeSupported, filterFilesByModalities } from '$lib/utils';
 	import { parseFilesToMessageExtras, processFilesToChatUploaded } from '$lib/utils/browser-only';
 	import { ErrorDialogType } from '$lib/enums';
@@ -67,8 +68,6 @@
 	let showEmptyFileDialog = $state(false);
 
 	let emptyFileNames = $state<string[]>([]);
-
-	let showEditor = $state(false);
 	let initialMessage = $state('');
 
 	let isEmpty = $derived(
@@ -346,7 +345,10 @@
 
 <div class="flex h-full w-full overflow-hidden">
 	<div class="relative flex h-full min-w-0 flex-1 flex-col">
-		<ChatScreenHeader {showEditor} onToggleEditor={() => (showEditor = !showEditor)} />
+		<ChatScreenHeader
+			showEditor={editorStore.isOpen}
+			onToggleEditor={() => editorStore.toggleEditor()}
+		/>
 
 		{#if !isEmpty}
 			<div
@@ -481,7 +483,7 @@
 		{/if}
 	</div>
 
-	{#if showEditor}
+	{#if editorStore.isOpen}
 		<div
 			class="h-full w-full max-w-[50%] border-l border-border bg-background"
 			transition:slide={{ axis: 'x', duration: 300 }}

@@ -1,5 +1,5 @@
-import type { ContentPartType, ServerModelStatus, ServerRole } from '$lib/enums';
-import type { ChatMessagePromptProgress, ChatRole } from './chat';
+import type { ChatMessagePromptProgress } from './chat';
+import { ContentPartType, MessageRole, ServerModelStatus, ServerRole } from '$lib/enums';
 
 export interface ApiChatCompletionToolFunction {
 	name: string;
@@ -43,7 +43,7 @@ export interface ApiErrorResponse {
 }
 
 export interface ApiChatMessageData {
-	role: ChatRole;
+	role: MessageRole;
 	content: string | ApiChatMessageContentPart[];
 	reasoning_content?: string;
 	tool_calls?: ApiChatCompletionToolCall[];
@@ -200,7 +200,7 @@ export interface ApiLlamaCppServerProps {
 
 export interface ApiChatCompletionRequest {
 	messages: Array<{
-		role: ChatRole;
+		role: MessageRole;
 		content: string | ApiChatMessageContentPart[];
 		reasoning_content?: string;
 		tool_calls?: ApiChatCompletionToolCall[];
@@ -239,8 +239,6 @@ export interface ApiChatCompletionRequest {
 	// Custom parameters (JSON string)
 	custom?: Record<string, unknown>;
 	timings_per_token?: boolean;
-	// Tools
-	tools?: any[];
 	tool_choice?: string | object;
 }
 

@@ -1615,7 +1615,6 @@ class ChatStore {
 
 		if (currentConfig.custom) apiOptions.custom = currentConfig.custom;
 
-		// Inject editor tools
 		return apiOptions;
 	}
 }

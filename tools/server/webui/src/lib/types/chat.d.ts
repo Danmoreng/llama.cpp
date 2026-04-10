@@ -1,5 +1,3 @@
-export type ChatMessageType = 'root' | 'text' | 'think' | 'system';
-export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 import type { ErrorDialogType } from '$lib/enums';
 import type { ApiChatCompletionToolCall } from './api';
 import type { DatabaseMessage, DatabaseMessageExtra } from './database';
