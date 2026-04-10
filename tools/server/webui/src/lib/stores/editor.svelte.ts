@@ -1,4 +1,6 @@
 export class EditorStore {
+	isOpen = $state(false);
+
 	currentCode = $state(`<html lang="en">
 	<style>
 		body {
@@ -15,6 +17,12 @@ export class EditorStore {
 		<h1>Hello World!</h1>
 	</body>
 </html>`);
+
+	openEditor = () => (this.isOpen = true);
+
+	closeEditor = () => (this.isOpen = false);
+
+	toggleEditor = () => (this.isOpen = !this.isOpen);
 
 	setCode = (v: string) => (this.currentCode = v);
 
