@@ -630,15 +630,12 @@ export class ChatService {
 	static convertDbMessageToApiChatMessageData(
 		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
 	): ApiChatMessageData {
-		const legacyToolCallId =
-			'tool_call_id' in message ? (message.tool_call_id ?? undefined) : undefined;
-
 		// Handle tool result messages (role: 'tool')
-		if (message.role === MessageRole.TOOL && (message.toolCallId || legacyToolCallId)) {
+		if (message.role === MessageRole.TOOL && message.toolCallId) {
 			return {
 				role: MessageRole.TOOL,
 				content: message.content,
-				tool_call_id: message.toolCallId || legacyToolCallId
+				tool_call_id: message.toolCallId
 			};
 		}
 

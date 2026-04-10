@@ -29,8 +29,6 @@ import type {
 	// Chat types
 	ChatAttachmentDisplayItem,
 	ChatAttachmentPreviewItem,
-	ChatMessageType,
-	ChatRole,
 	ChatUploadedFile,
 	ChatMessageSiblingInfo,
 	ChatMessagePromptProgress,
@@ -96,8 +94,6 @@ declare global {
 		ChatMessagePromptProgress,
 		ChatMessageSiblingInfo,
 		ChatMessageTimings,
-		ChatMessageType,
-		ChatRole,
 		ChatUploadedFile,
 		// Database types
 		DatabaseConversation,
